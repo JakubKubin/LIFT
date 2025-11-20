@@ -236,10 +236,10 @@ for epoch in range(num_epochs):
         frames = batch['frames'].cuda()
         ref_frames = batch['ref_frames'].cuda()
         gt = batch['gt'].cuda()
-        
+
         output = model(frames, ref_frames, timestep=0.5)
         loss = loss_fn(output['prediction'], gt)
-        
+
         # ... backward pass
 ```
 
@@ -253,7 +253,7 @@ for epoch in range(num_epochs):
    ```bash
    ls /data/X4K1000FPS/
    # Should show: 001  002  003  ...
-   
+
    ls /data/X4K1000FPS/001/
    # Should show: *.mp4 files
    ```
@@ -268,7 +268,7 @@ for epoch in range(num_epochs):
    ```bash
    # Extract videos
    unrar x UCF101.rar /data/UCF-101/
-   
+
    # Optional: Extract official splits
    unrar x UCF101TrainTestSplits-RecognitionTask.zip /data/UCF-101/
    ```
@@ -277,7 +277,7 @@ for epoch in range(num_epochs):
    ```bash
    ls /data/UCF-101/
    # Should show: ApplyEyeMakeup  ApplyLipstick  Archery  ...
-   
+
    ls /data/UCF-101/ApplyEyeMakeup/
    # Should show: *.avi files
    ```
@@ -356,12 +356,12 @@ start = time.time()
 for i, batch in enumerate(train_loader):
     load_time = time.time() - start
     print(f"Batch {i}: {load_time:.3f}s")
-    
+
     # Process batch
     # ...
-    
+
     start = time.time()
-    
+
     if i > 10:
         break
 ```
@@ -382,7 +382,7 @@ ffmpeg -v error -i video.mp4 -f null -
 **Solution**: Check directory structure matches expected format
 
 ### Issue: Slow loading
-**Solution**: 
+**Solution**:
 - Increase `num_workers`
 - Move data to SSD
 - Reduce `crop_size`

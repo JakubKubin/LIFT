@@ -209,8 +209,8 @@ Update the training script to support dataset selection:
 
 ```python
 # Add argument
-parser.add_argument('--dataset', type=str, 
-                   choices=['vimeo', 'x4k', 'ucf101'], 
+parser.add_argument('--dataset', type=str,
+                   choices=['vimeo', 'x4k', 'ucf101'],
                    default='vimeo')
 parser.add_argument('--data_root', type=str, required=True)
 
@@ -255,7 +255,7 @@ python train.py --dataset vimeo --data_root /data/vimeo90k
 ### "Cannot open video: path/to/video.mp4"
 **Cause**: Corrupted video file or wrong codec
 
-**Fix**: 
+**Fix**:
 ```bash
 # Check video integrity
 ffmpeg -v error -i video.mp4 -f null -

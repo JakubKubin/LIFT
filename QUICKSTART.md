@@ -43,7 +43,7 @@ for batch in loader:
     frames = batch['frames']        # [4, 64, 3, 224, 224]
     ref_frames = batch['ref_frames'] # [4, 2, 3, 224, 224]
     gt = batch['gt']                # [4, 3, 224, 224]
-    
+
     print(f"Frames shape: {frames.shape}")
     print(f"Ref frames shape: {ref_frames.shape}")
     print(f"GT shape: {gt.shape}")
@@ -230,16 +230,16 @@ os.makedirs(f'{data_root}/sequences/test', exist_ok=True)
 for seq_id in range(3):
     seq_dir = f'{data_root}/sequences/test/seq{seq_id:03d}'
     os.makedirs(seq_dir, exist_ok=True)
-    
+
     # Create 64 frames with simple pattern
     for frame_id in range(64):
         # Generate synthetic frame
         img = np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8)
-        
+
         # Add some structure so frames aren't completely random
         x = frame_id * 4
         cv2.circle(img, (x, 128), 20, (255, 255, 255), -1)
-        
+
         # Save frame
         cv2.imwrite(f'{seq_dir}/im{frame_id:02d}.png', img)
 

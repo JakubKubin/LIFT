@@ -14,14 +14,14 @@ import math
 class DepthwiseSeparableConv(nn.Module):
     """
     Depthwise separable convolution for efficient spatial processing.
-    
+
     Reduces parameters and computation compared to standard convolution.
     """
-    
+
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
         super().__init__()
         self.depthwise = nn.Conv2d(
-            in_channels, in_channels, 
+            in_channels, in_channels,
             kernel_size=kernel_size,
             padding=padding,
             groups=in_channels,  # Each channel processed separately
@@ -32,7 +32,7 @@ class DepthwiseSeparableConv(nn.Module):
             kernel_size=1,
             bias=True
         )
-    
+
     def forward(self, x):
         x = self.depthwise(x)
         x = self.pointwise(x)
@@ -42,114 +42,114 @@ class DepthwiseSeparableConv(nn.Module):
 class WindowedTemporalAttention(nn.Module):
     """
     Windowed temporal self-attention.
-    
+
     Divides 64 frames into windows of 8 frames each and applies
     attention within each window independently.
-    
+
     This reduces complexity from O(T^2) to O(T * W) where T=64, W=8.
     """
-    
+
     def __init__(self, dim, num_heads=8, window_size=8, dropout=0.1):
         super().__init__()
-        
+
         assert dim % num_heads == 0, "dim must be divisible by num_heads"
-        
+
         self.dim = dim
         self.num_heads = num_heads
         self.window_size = window_size
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
-        
+
         # QKV projection
         self.qkv = nn.Linear(dim, dim * 3)
-        
+
         # Output projection
         self.proj = nn.Linear(dim, dim)
         self.dropout = nn.Dropout(dropout)
-    
+
     def forward(self, x):
         """
         Apply windowed temporal attention.
-        
+
         Args:
             x: Input tensor [B, T, L, D] where
                B = batch size
                T = number of frames (64)
                L = number of spatial tokens per frame
                D = embedding dimension
-               
+
         Returns:
             Output tensor [B, T, L, D]
         """
         B, T, L, D = x.shape
         assert T % self.window_size == 0, "T must be divisible by window_size"
-        
+
         num_windows = T // self.window_size
-        
+
         # Reshape for window-wise processing
         # [B, T, L, D] -> [B, num_windows, window_size, L, D]
         x = x.view(B, num_windows, self.window_size, L, D)
-        
+
         # Merge batch and num_windows for parallel processing
         # [B, num_windows, window_size, L, D] -> [B*num_windows, window_size*L, D]
         x = x.view(B * num_windows, self.window_size * L, D)
-        
+
         # QKV projection
         qkv = self.qkv(x)  # [B*num_windows, window_size*L, 3*D]
         qkv = qkv.reshape(B * num_windows, self.window_size * L, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B*num_windows, num_heads, window_size*L, head_dim]
-        
+
         q, k, v = qkv[0], qkv[1], qkv[2]
-        
+
         # Scaled dot-product attention
         attn = (q @ k.transpose(-2, -1)) * self.scale  # [B*num_windows, num_heads, window_size*L, window_size*L]
         attn = attn.softmax(dim=-1)
         attn = self.dropout(attn)
-        
+
         # Apply attention to values
         out = attn @ v  # [B*num_windows, num_heads, window_size*L, head_dim]
-        
+
         # Reshape back
         out = out.transpose(1, 2).reshape(B * num_windows, self.window_size * L, D)
-        
+
         # Output projection
         out = self.proj(out)
         out = self.dropout(out)
-        
+
         # Reshape to original shape
         out = out.view(B, num_windows, self.window_size, L, D)
         out = out.view(B, T, L, D)
-        
+
         return out
 
 
 class TransformerBlock(nn.Module):
     """
     Complete transformer block with temporal attention and spatial processing.
-    
+
     Architecture:
     1. Windowed temporal attention along time dimension
     2. Spatial depthwise separable convolution
     3. Feed-forward network (FFN)
-    
+
     Uses pre-normalization (LayerNorm before attention/FFN) for stability.
     """
-    
+
     def __init__(self, dim, num_heads=8, window_size=8, dropout=0.1):
         super().__init__()
-        
+
         self.dim = dim
-        
+
         # Temporal attention
         self.norm1 = nn.LayerNorm(dim)
         self.temporal_attn = WindowedTemporalAttention(
             dim, num_heads, window_size, dropout
         )
-        
+
         # Spatial processing
         self.norm2 = nn.GroupNorm(8, dim)  # GroupNorm for spatial features
         self.spatial_conv = DepthwiseSeparableConv(dim, dim, kernel_size=3, padding=1)
-        
+
         # Feed-forward network
         self.norm3 = nn.LayerNorm(dim)
         self.ffn = nn.Sequential(
@@ -159,27 +159,27 @@ class TransformerBlock(nn.Module):
             nn.Linear(dim * 4, dim),
             nn.Dropout(dropout)
         )
-    
+
     def forward(self, x, spatial_h, spatial_w):
         """
         Process tokens through transformer block.
-        
+
         Args:
             x: Input tensor [B, T, L, D]
             spatial_h: Spatial height of feature map
             spatial_w: Spatial width of feature map
-            
+
         Returns:
             Output tensor [B, T, L, D]
         """
         B, T, L, D = x.shape
-        
+
         # 1. Temporal attention with residual
         residual = x
         x = self.norm1(x)
         x = self.temporal_attn(x)
         x = x + residual
-        
+
         # 2. Spatial processing
         # Reshape to spatial format [B*T, D, H, W]
         x_spatial = x.view(B * T, spatial_h, spatial_w, D).permute(0, 3, 1, 2)
@@ -189,35 +189,35 @@ class TransformerBlock(nn.Module):
         x_spatial = x_spatial + residual
         # Reshape back to [B, T, L, D]
         x = x_spatial.permute(0, 2, 3, 1).reshape(B, T, L, D)
-        
+
         # 3. Feed-forward network with residual
         residual = x
         x = self.norm3(x)
         x = self.ffn(x)
         x = x + residual
-        
+
         return x
 
 
 class TemporalAggregator(nn.Module):
     """
     Aggregates 64-frame temporal context using transformer.
-    
+
     Process:
     1. Convert spatial features to tokens (spatial patching)
     2. Process through transformer layers
     3. Aggregate temporal information using learned attention weights
     """
-    
+
     def __init__(self, config):
         super().__init__()
-        
+
         self.num_layers = config.transformer_layers
         self.dim = config.transformer_dim
         self.num_heads = config.transformer_heads
-        self.window_size = config.temporal_window_size
+        self.window_size = config.adjusted_window_size
         self.patch_size = config.spatial_patch_size
-        
+
         # Transformer layers
         self.layers = nn.ModuleList([
             TransformerBlock(
@@ -228,7 +228,7 @@ class TemporalAggregator(nn.Module):
             )
             for _ in range(self.num_layers)
         ])
-        
+
         # Frame importance network
         # Learns which frames are most important for interpolation
         self.frame_importance = nn.Sequential(
@@ -236,60 +236,60 @@ class TemporalAggregator(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(self.dim // 4, 1)
         )
-    
+
     def spatial_to_tokens(self, x, patch_size):
         """
         Convert spatial features to tokens using patching.
-        
+
         Args:
             x: Features [B, T, C, H, W]
             patch_size: Size of spatial patches
-            
+
         Returns:
             Tokens [B, T, L, D] where L = (H/patch_size) * (W/patch_size)
         """
         B, T, C, H, W = x.shape
-        
+
         # Unfold to patches
         # [B, T, C, H, W] -> [B*T, C, H, W]
         x = x.view(B * T, C, H, W)
-        
+
         # Use unfold for patching
         patches = F.unfold(x, kernel_size=patch_size, stride=patch_size)
         # [B*T, C*patch_size*patch_size, num_patches]
-        
+
         num_patches = patches.shape[2]
         patch_dim = C * patch_size * patch_size
-        
+
         # Reshape to [B, T, num_patches, patch_dim]
         tokens = patches.transpose(1, 2).reshape(B, T, num_patches, patch_dim)
-        
+
         # Project to model dimension if needed
         if patch_dim != self.dim:
             self.patch_proj = nn.Linear(patch_dim, self.dim).to(x.device)
             tokens = self.patch_proj(tokens)
-        
+
         return tokens, H // patch_size, W // patch_size
-    
+
     def tokens_to_spatial(self, tokens, spatial_h, spatial_w, patch_size):
         """
         Convert tokens back to spatial features.
-        
+
         Args:
             tokens: Tokens [B, T, L, D]
             spatial_h: Height of spatial grid (in patches)
             spatial_w: Width of spatial grid (in patches)
             patch_size: Size of patches
-            
+
         Returns:
             Features [B, T, D, H, W]
         """
         B, T, L, D = tokens.shape
-        
+
         # Reshape to spatial grid
         x = tokens.view(B, T, spatial_h, spatial_w, D)
         x = x.permute(0, 1, 4, 2, 3)  # [B, T, D, H, W]
-        
+
         # Upsample if patch_size > 1
         if patch_size > 1:
             H_out = spatial_h * patch_size
@@ -301,52 +301,52 @@ class TemporalAggregator(nn.Module):
                 align_corners=False
             )
             x = x.view(B, T, D, H_out, W_out)
-        
+
         return x
-    
+
     def forward(self, feats_s16):
         """
         Aggregate temporal context from 64 frames.
-        
+
         Args:
             feats_s16: Features at s16 scale [B, 64, 256, H/16, W/16]
-            
+
         Returns:
             Dictionary with:
                 - 'context': Aggregated temporal context [B, 256, H/16, W/16]
                 - 'attention_weights': Frame importance weights [B, 64]
         """
         B, T, C, H, W = feats_s16.shape
-        
+
         # Convert to tokens
         tokens, spatial_h, spatial_w = self.spatial_to_tokens(
             feats_s16, self.patch_size
         )  # [B, T, L, D]
-        
+
         # Process through transformer layers
         for layer in self.layers:
             tokens = layer(tokens, spatial_h, spatial_w)
-        
+
         # Compute frame importance weights
         # Global average pool over spatial tokens for each frame
         frame_features = tokens.mean(dim=2)  # [B, T, D]
-        
+
         # Predict importance scores
         importance_logits = self.frame_importance(frame_features)  # [B, T, 1]
         importance_weights = torch.softmax(importance_logits.squeeze(-1), dim=1)  # [B, T]
-        
+
         # Weighted aggregation
         # [B, T, L, D] * [B, T, 1, 1] -> [B, T, L, D] -> [B, L, D]
         weighted_tokens = tokens * importance_weights.unsqueeze(-1).unsqueeze(-1)
         aggregated_tokens = weighted_tokens.sum(dim=1)  # [B, L, D]
-        
+
         # Convert back to spatial features
         aggregated_tokens = aggregated_tokens.unsqueeze(1)  # [B, 1, L, D]
         context = self.tokens_to_spatial(
             aggregated_tokens, spatial_h, spatial_w, self.patch_size
         )  # [B, 1, D, H, W]
         context = context.squeeze(1)  # [B, D, H, W]
-        
+
         return {
             'context': context,
             'attention_weights': importance_weights
@@ -356,20 +356,20 @@ class TemporalAggregator(nn.Module):
 if __name__ == '__main__':
     # Test temporal aggregator
     from configs.default import Config
-    
+
     config = Config()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+
     # Create test input
     feats_s16 = torch.rand(2, 64, 256, 16, 16).to(device)
-    
+
     # Create aggregator
     aggregator = TemporalAggregator(config).to(device)
-    
+
     # Forward pass
     with torch.no_grad():
         output = aggregator(feats_s16)
-    
+
     print("Temporal Aggregator output shapes:")
     print(f"  Context: {output['context'].shape}")
     print(f"  Attention weights: {output['attention_weights'].shape}")
@@ -377,7 +377,7 @@ if __name__ == '__main__':
     print(f"  Min: {output['attention_weights'][0].min():.4f}")
     print(f"  Max: {output['attention_weights'][0].max():.4f}")
     print(f"  Sum: {output['attention_weights'][0].sum():.4f}")
-    
+
     # Check memory usage
     if torch.cuda.is_available():
         print(f"\nGPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")

@@ -8,7 +8,7 @@ All core components of the LIFT model have been implemented and are ready for tr
 
 ### 1. Complete Data Pipeline (DONE)
 
-**Files**: 
+**Files**:
 - `dataset/vimeo_64.py`
 - `dataset/__init__.py`
 - `DATA_PIPELINE.md`
@@ -140,7 +140,7 @@ All core components of the LIFT model have been implemented and are ready for tr
 ## Project Status Summary
 
 - Data Pipeline: 100% COMPLETE
-- Stage 1 (Encoder): 100% COMPLETE  
+- Stage 1 (Encoder): 100% COMPLETE
 - Stage 2 (Transformer): 100% COMPLETE
 - Stage 3 (Flow): 100% COMPLETE ← NEW!
 - Stage 4 (Synthesis): 100% COMPLETE ← NEW!

@@ -10,7 +10,7 @@ LIFT/
 │   ├── encoder.py      # Stage 1: Feature extraction from 64 frames
 │   ├── transformer.py  # Stage 2: Temporal aggregation with windowed attention
 │   ├── ifnet.py       # Stage 3: Multi-scale flow estimation
-│   ├── synthesis.py   # Stage 4: Coarse frame synthesis  
+│   ├── synthesis.py   # Stage 4: Coarse frame synthesis
 │   ├── refine.py      # Stage 5: Full-resolution refinement
 │   ├── warplayer.py   # Warping utilities
 │   ├── loss.py        # Loss functions
@@ -53,7 +53,7 @@ The key challenge is handling 64 frames efficiently. Our approach:
 - Memory-efficient sequential loading
 - Data augmentation: random crop, flip, rotation, temporal reversal
 
-#### VideoSequenceDataset  
+#### VideoSequenceDataset
 - Loads frames directly from video files
 - More efficient for long sequences (uses video codecs)
 - Supports random frame extraction for augmentation
@@ -110,7 +110,7 @@ train_loader = DataLoader(
 
 ### Stage 3: Flow Estimation
 - Two-scale cascade: s8 -> s4
-- Bi-directional flows: I_31 -> I_t and I_32 -> I_t  
+- Bi-directional flows: I_31 -> I_t and I_32 -> I_t
 - Occlusion maps predicted in logit space
 - Context injection from 64-frame aggregation
 
@@ -126,7 +126,7 @@ train_loader = DataLoader(
 
 ## Training Strategy
 
-1. **Phase 1 (Epochs 0-10)**: 
+1. **Phase 1 (Epochs 0-10)**:
    - Freeze encoder weights (use pretrained RIFE)
    - Train transformer and flow modules
    - Resolution: 224x224
