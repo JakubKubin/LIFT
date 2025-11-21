@@ -48,11 +48,11 @@ def get_lr_scheduler(optimizer, config, steps_per_epoch):
     return scheduler
 
 
-def compute_psnr(pred, target):
+def compute_psnr(pred, target) -> torch.Tensor:
     """Compute PSNR between predicted and target images."""
     mse = torch.mean((pred - target) ** 2)
     if mse == 0:
-        return float('inf')
+        return torch.tensor(float('inf'))
     return -10 * torch.log10(mse)
 
 
@@ -221,7 +221,8 @@ def main():
         mode='train',
         num_frames=config.num_frames,
         crop_size=config.crop_size,
-        augment=True
+        augment=True,
+        input_scale=config.input_scale
     )
 
     val_dataset = Vimeo64Dataset(
@@ -229,7 +230,8 @@ def main():
         mode='val',
         num_frames=config.num_frames,
         crop_size=config.crop_size,  # Use same size for validation
-        augment=False
+        augment=False,
+        input_scale=config.input_scale
     )
 
     print(f"Train samples: {len(train_dataset)}")

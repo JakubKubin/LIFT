@@ -38,7 +38,8 @@ class UCF101Dataset(BaseVideoDataset):
                  train_split: float = 0.7,
                  val_split: float = 0.15,
                  use_official_splits: bool = False,
-                 split_file: str | None = None):
+                 split_file: str | None = None,
+                 input_scale: float = 1.0):
         """
         Args:
             data_root: Root directory (/data/UCF-101)
@@ -57,7 +58,7 @@ class UCF101Dataset(BaseVideoDataset):
         self.train_split = train_split
         self.val_split = val_split
 
-        super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames)
+        super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames, input_scale)
 
         # Load video list
         self._load_video_list()

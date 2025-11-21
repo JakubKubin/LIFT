@@ -10,6 +10,7 @@ class Config:
     num_frames = 7
     crop_size = (224, 224)
     target_resolution = (256, 448)  # Target resolution for experiments
+    input_scale = 1.0
 
     # Model architecture parameters
     # Stage 1: Encoder

@@ -135,7 +135,8 @@ class BaseVideoDataset(Dataset):
                  num_frames: int = 64,
                  crop_size: Tuple[int, int] = (224, 224),
                  augment: bool = True,
-                 cache_frames: bool = False):
+                 cache_frames: bool = False,
+                 input_scale: float = 1.0):
         """
         Args:
             data_root: Root directory of dataset
@@ -152,8 +153,9 @@ class BaseVideoDataset(Dataset):
         self.crop_size = crop_size
         self.augment = augment and (mode == 'train')
         self.cache_frames = cache_frames
+        self.input_scale = input_scale
 
-        # Reference frames are at positions 31 and 32
+        # Reference frames
         self.mid_idx = num_frames // 2
 
         if self.is_odd:
@@ -187,7 +189,7 @@ class BaseVideoDataset(Dataset):
         Returns:
             List of frames as numpy arrays
         """
-        cache_key = f"{video_path}_{start_frame}"
+        cache_key = f"{video_path}_{start_frame}_{self.input_scale}"
 
         # Check cache
         if self._frame_cache is not None and cache_key in self._frame_cache:
@@ -200,6 +202,10 @@ class BaseVideoDataset(Dataset):
             num_frames=self.num_frames,
             target_size=None  # Don't resize yet, do it after augmentation
         )
+
+        # Resize if scale is not 1.0
+        if self.input_scale != 1.0:
+            frames = [cv2.resize(f, (0, 0), fx=self.input_scale, fy=self.input_scale, interpolation=cv2.INTER_LINEAR) for f in frames]
 
         # Cache if enabled
         if self._frame_cache is not None:

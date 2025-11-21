@@ -34,7 +34,8 @@ class X4K1000FPSDataset(BaseVideoDataset):
                  augment: bool = True,
                  cache_frames: bool = False,
                  train_split: float = 0.8,
-                 val_split: float = 0.1):
+                 val_split: float = 0.1,
+                 input_scale: float = 1.0):
         """
         Args:
             data_root: Root directory (/data/X4K1000FPS)
@@ -46,7 +47,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
             train_split: Fraction of videos for training (0.8 = 80%)
             val_split: Fraction of videos for validation (0.1 = 10%)
         """
-        super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames)
+        super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames, input_scale)
 
         self.train_split = train_split
         self.val_split = val_split

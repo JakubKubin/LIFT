@@ -26,7 +26,8 @@ class Vimeo64Dataset(Dataset):
                  mode='train',
                  num_frames=64,
                  crop_size=(224, 224),
-                 augment=True):
+                 augment=True,
+                 input_scale=1.0):
         """
         Args:
             data_root: Root directory containing video sequences
@@ -40,8 +41,9 @@ class Vimeo64Dataset(Dataset):
         self.num_frames = num_frames
         self.crop_size = crop_size
         self.augment = augment and (mode == 'train')
+        self.input_scale = input_scale
 
-        # Reference frames are at positions 31 and 32
+        # Reference frames
         mid = self.num_frames // 2
         self.ref_frame_idx = [mid - 1, mid]
         self.target_timestep = 0.5
@@ -105,6 +107,9 @@ class Vimeo64Dataset(Dataset):
             raise ValueError(f"Failed to load frame: {frame_path}")
         # BGR to RGB
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        if self.input_scale != 1.0:
+            img = cv2.resize(img, (0, 0), fx=self.input_scale, fy=self.input_scale, interpolation=cv2.INTER_LINEAR)
         return img
 
     @staticmethod
@@ -250,7 +255,8 @@ class VideoSequenceDataset(Dataset):
                  mode='train',
                  num_frames=64,
                  crop_size=(224, 224),
-                 augment=True):
+                 augment=True,
+                 input_scale=1.0):
         """
         Args:
             video_list_file: Text file containing list of video paths
@@ -263,6 +269,7 @@ class VideoSequenceDataset(Dataset):
         self.num_frames = num_frames
         self.crop_size = crop_size
         self.augment = augment and (mode == 'train')
+        self.input_scale = input_scale
 
         # Load video paths
         with open(video_list_file, 'r') as f:
@@ -311,6 +318,9 @@ class VideoSequenceDataset(Dataset):
         # If video is too short, repeat last frame
         while len(frames) < self.num_frames:
             frames.append(frames[-1].copy())
+
+        if self.input_scale != 1.0:
+            frames = [cv2.resize(f, (0, 0), fx=self.input_scale, fy=self.input_scale, interpolation=cv2.INTER_LINEAR) for f in frames]
 
         return frames
 
