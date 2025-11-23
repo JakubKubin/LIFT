@@ -196,8 +196,12 @@ if __name__ == '__main__':
 
     # Create test inputs
     B, H, W = 2, 256, 256
+    # Coarse frame is at 1/4 resolution (s4)
     coarse_frame = torch.rand(B, 3, H // 4, W // 4).to(device)
-    ref_feats_s4 = torch.rand(B, 2, 128, H // 4, W // 4).to(device)
+    # Reference features are also at 1/4 resolution (s4)
+    # Using config to get correct channel count
+    c_s4 = config.encoder_channels['s4']
+    ref_feats_s4 = torch.rand(B, 2, c_s4, H // 4, W // 4).to(device)
 
     # Create refinement module
     refinement = FullResolutionRefinement(config).to(device)

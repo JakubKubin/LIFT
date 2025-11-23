@@ -236,16 +236,23 @@ if __name__ == '__main__':
     print(f"  Trainable: {params['trainable']:,}")
     print(f"  Frozen: {params['frozen']:,}")
 
-    # Create test input
+    # Create test input DYNAMICALLY based on configuration
     B, H, W = 2, 256, 256
-    frames = torch.rand(B, 64, 3, H, W).to(device)
 
-    print(f"\nInput shape: {frames.shape}")
+    # config.model_frames calculates the correct input size automatically
+    # (e.g., returns 6 if num_frames=7, or 64 if num_frames=64)
+    num_test_frames = config.model_frames
+
+    print(f"\nGenerating random input with {num_test_frames} frames (based on config.num_frames={config.num_frames})...")
+    frames = torch.rand(B, num_test_frames, 3, H, W).to(device)
+
+    print(f"Input shape: {frames.shape}")
 
     # Test forward pass
     print("\nRunning forward pass...")
     model.eval()
     with torch.no_grad():
+        # Note: Reference frame logic is handled internally by the model based on config
         output = model(frames, timestep=0.5, return_intermediate=True)
 
     print("\nOutput shapes:")

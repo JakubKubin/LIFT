@@ -164,6 +164,7 @@ if __name__ == '__main__':
     ref_frames = torch.rand(B, 2, 3, H, W).to(device)
 
     # Simulate flow estimator output
+    # Sizes based on s4 resolution (H/4, W/4)
     flow_output = {
         'flow_31': torch.randn(B, 2, H // 4, W // 4).to(device) * 5,
         'flow_32': torch.randn(B, 2, H // 4, W // 4).to(device) * 5,
@@ -171,6 +172,7 @@ if __name__ == '__main__':
         'occ_32': torch.rand(B, 1, H // 4, W // 4).to(device),
     }
 
+    # Context is at s16 (H/16, W/16)
     context = torch.rand(B, 256, H // 16, W // 16).to(device)
 
     # Create synthesis module

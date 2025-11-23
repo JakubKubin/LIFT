@@ -113,7 +113,15 @@ class LaplacianPyramidLoss(nn.Module):
 
             # Laplacian = original - upsampled
             # This captures the high-frequency details lost in downsampling
-            laplacian = current - upsampled
+            if current.shape == upsampled.shape:
+                 laplacian = current - upsampled
+            else:
+                 # Handle edge cases where upsampling might not match exactly due to odd dimensions
+                 # Crop or pad if necessary, though usually power-of-2 dimensions avoid this
+                 # For simplicity here, assume dimensions match or resize upsampled
+                 upsampled = F.interpolate(upsampled, size=current.shape[2:], mode='bilinear', align_corners=False)
+                 laplacian = current - upsampled
+
             pyramid.append(laplacian)
 
             # Move to next level

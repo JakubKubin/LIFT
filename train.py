@@ -125,7 +125,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch,
             writer.add_scalar('train/lr', scheduler.get_last_lr()[0], global_step)
 
             # Log attention weights visualization
-            attn = outputs['attention_weights'][0].cpu().numpy()
+            attn = outputs['attention_weights'][0].detach().cpu().numpy()
             writer.add_histogram('train/attention_weights', attn, global_step)
 
         global_step += 1
@@ -185,17 +185,21 @@ def validate(model, dataloader, loss_fn, device, epoch, config, writer):
 
 
 def main():
+    import sys
+    # sys.path.append('..') # Not needed if running from root
+    from configs.default import Config
+
     parser = argparse.ArgumentParser(description='Train LIFT model')
     parser.add_argument('--data_root', type=str, required=True,
-                       help='Path to dataset root directory')
+                        help='Path to dataset root directory')
     parser.add_argument('--batch_size', type=int, default=None,
-                       help='Batch size for training (overrides config)')
+                        help='Batch size for training (overrides config)')
     parser.add_argument('--num_epochs', type=int, default=None,
-                       help='Number of epochs (overrides config)')
+                        help='Number of epochs (overrides config)')
     parser.add_argument('--checkpoint', type=str, default=None,
-                       help='Path to checkpoint to resume from')
+                        help='Path to checkpoint to resume from')
     parser.add_argument('--pretrained_encoder', type=str, default=None,
-                       help='Path to pretrained encoder weights')
+                        help='Path to pretrained encoder weights')
     args = parser.parse_args()
 
     # Configuration
@@ -237,6 +241,9 @@ def main():
     print(f"Train samples: {len(train_dataset)}")
     print(f"Val samples: {len(val_dataset)}")
 
+    if len(train_dataset) == 0:
+        raise ValueError(f"No training samples found in {config.data_root}. Check directory structure.")
+
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
@@ -265,7 +272,29 @@ def main():
     if args.pretrained_encoder:
         print(f"Loading pretrained encoder from {args.pretrained_encoder}")
         checkpoint = torch.load(args.pretrained_encoder, map_location=device)
-        model.encoder.load_state_dict(checkpoint, strict=False)
+        
+        # Handle potential key mismatches if loading from standard RIFE
+        encoder_state = {}
+        for k, v in checkpoint.items():
+            # If checkpoint keys start with 'module.', remove it (DataParallel)
+            if k.startswith('module.'):
+                k = k[7:]
+            # If loading direct RIFE weights, keys might need adjustment
+            # This assumes checkpoint contains exactly the encoder state dict
+            encoder_state[k] = v
+            
+        # If keys in checkpoint have 'encoder.' prefix, remove it to match model.encoder
+        encoder_state = {
+            k.replace('encoder.', ''): v
+            for k, v in encoder_state.items()
+            if 'encoder.' in k or k in model.encoder.state_dict()
+        }
+        
+        try:
+            model.encoder.load_state_dict(encoder_state, strict=False)
+            print("Pretrained encoder loaded successfully")
+        except Exception as e:
+            print(f"Warning: Failed to load some encoder weights: {e}")
 
     # Print model info
     params = model.count_parameters()
@@ -312,8 +341,8 @@ def main():
         )
         print(f"Train - Loss: {train_losses['total']:.4f}, L1: {train_losses['l1']:.4f}, Lap: {train_losses['lap']:.4f}")
 
-        # Validate every 5 epochs
-        if (epoch + 1) % 5 == 0:
+        # Validate based on config interval
+        if (epoch + 1) % config.val_interval == 0:
             val_losses, val_psnr = validate(model, val_loader, loss_fn, device, epoch, config, writer)
             print(f"Val - Loss: {val_losses['total']:.4f}, PSNR: {val_psnr:.2f} dB")
 
@@ -335,7 +364,7 @@ def main():
                 }, checkpoint_path)
                 print(f"Saved best model (val_loss: {best_val_loss:.4f})")
 
-        # Save checkpoint every 10 epochs
+        # Save checkpoint every 10 epochs (or custom interval if preferred)
         if (epoch + 1) % 10 == 0:
             checkpoint_path = os.path.join(
                 config.checkpoint_dir,

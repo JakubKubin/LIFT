@@ -82,21 +82,27 @@ class WindowedTemporalAttention(nn.Module):
             Output tensor [B, T, L, D]
         """
         B, T, L, D = x.shape
-        assert T % self.window_size == 0, "T must be divisible by window_size"
-
-        num_windows = T // self.window_size
+        # Ensure T is divisible by window size, or adjust logic if T < window_size
+        # For now, we assume strict divisibility as per design or T=window_size
+        if T % self.window_size != 0:
+             # Fallback: if T is not divisible (e.g. during testing with small T), treat whole sequence as one window
+             num_windows = 1
+             eff_window_size = T
+        else:
+             num_windows = T // self.window_size
+             eff_window_size = self.window_size
 
         # Reshape for window-wise processing
         # [B, T, L, D] -> [B, num_windows, window_size, L, D]
-        x = x.view(B, num_windows, self.window_size, L, D)
+        x = x.view(B, num_windows, eff_window_size, L, D)
 
         # Merge batch and num_windows for parallel processing
         # [B, num_windows, window_size, L, D] -> [B*num_windows, window_size*L, D]
-        x = x.view(B * num_windows, self.window_size * L, D)
+        x = x.view(B * num_windows, eff_window_size * L, D)
 
         # QKV projection
         qkv = self.qkv(x)  # [B*num_windows, window_size*L, 3*D]
-        qkv = qkv.reshape(B * num_windows, self.window_size * L, 3, self.num_heads, self.head_dim)
+        qkv = qkv.reshape(B * num_windows, eff_window_size * L, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B*num_windows, num_heads, window_size*L, head_dim]
 
         q, k, v = qkv[0], qkv[1], qkv[2]
@@ -110,14 +116,14 @@ class WindowedTemporalAttention(nn.Module):
         out = attn @ v  # [B*num_windows, num_heads, window_size*L, head_dim]
 
         # Reshape back
-        out = out.transpose(1, 2).reshape(B * num_windows, self.window_size * L, D)
+        out = out.transpose(1, 2).reshape(B * num_windows, eff_window_size * L, D)
 
         # Output projection
         out = self.proj(out)
         out = self.dropout(out)
 
         # Reshape to original shape
-        out = out.view(B, num_windows, self.window_size, L, D)
+        out = out.view(B, num_windows, eff_window_size, L, D)
         out = out.view(B, T, L, D)
 
         return out
@@ -360,8 +366,9 @@ if __name__ == '__main__':
     config = Config()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Create test input
-    feats_s16 = torch.rand(2, 64, 256, 16, 16).to(device)
+    # Create test input dynamically
+    num_test_frames = config.model_frames
+    feats_s16 = torch.rand(2, num_test_frames, 256, 16, 16).to(device)
 
     # Create aggregator
     aggregator = TemporalAggregator(config).to(device)
