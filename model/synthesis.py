@@ -122,7 +122,7 @@ class CoarseSynthesis(nn.Module):
         numerator = occ_31 * warped_31 + occ_32 * warped_32
 
         # Denominator: sum of weights (with epsilon for numerical stability)
-        epsilon = 1e-8
+        epsilon = 1e-6
         denominator = occ_31 + occ_32 + epsilon
 
         # Blended frame

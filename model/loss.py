@@ -11,7 +11,7 @@ Includes:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import lpips
 
 def gaussian_kernel(size=5, sigma=1.0, channels=3):
     """
@@ -190,22 +190,23 @@ class OcclusionLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, occ1, occ2, img1, img2, warped1, warped2, gt):
+    def forward(self, occ1_logits, occ2_logits, warped1, warped2, gt):
         """
         Compute occlusion loss.
 
         Args:
-            occ1: Occlusion map for frame 1 [B, 1, H, W]
-            occ2: Occlusion map for frame 2 [B, 1, H, W]
-            img1: Reference frame 1 [B, 3, H, W]
-            img2: Reference frame 2 [B, 3, H, W]
-            warped1: Warped frame 1 [B, 3, H, W]
-            warped2: Warped frame 2 [B, 3, H, W]
-            gt: Ground truth [B, 3, H, W]
+            occ1_logits: Occlusion logits for frame 1 [B, 1, H_s4, W_s4]
+            occ2_logits: Occlusion logits for frame 2 [B, 1, H_s4, W_s4]
+            warped1: Warped frame 1 [B, 3, H_s4, W_s4]
+            warped2: Warped frame 2 [B, 3, H_s4, W_s4]
+            gt: Ground truth [B, 3, H, W] (Full resolution)
 
         Returns:
             Scalar occlusion loss
         """
+        if gt.shape[-2:] != warped1.shape[-2:]:
+            gt = F.interpolate(gt, size=warped1.shape[-2:], mode='bilinear', align_corners=False)
+
         # Compute photometric errors
         error1 = torch.abs(warped1 - gt).mean(dim=1, keepdim=True)  # [B, 1, H, W]
         error2 = torch.abs(warped2 - gt).mean(dim=1, keepdim=True)  # [B, 1, H, W]
@@ -215,8 +216,8 @@ class OcclusionLoss(nn.Module):
         ideal_occ2 = (error2 < error1).float()
 
         # BCE loss between predicted and ideal occlusion
-        loss = F.binary_cross_entropy(occ1, ideal_occ1) + \
-               F.binary_cross_entropy(occ2, ideal_occ2)
+        loss = F.binary_cross_entropy_with_logits(occ1_logits, ideal_occ1) + \
+               F.binary_cross_entropy_with_logits(occ2_logits, ideal_occ2)
 
         return loss
 
@@ -266,15 +267,22 @@ class LIFTLoss(nn.Module):
         self.char_loss = CharbonnierLoss()
         self.flow_smooth_loss = FlowSmoothnessLoss()
         self.occ_loss = OcclusionLoss()
+        self.lpips_loss = lpips.LPIPS(net='vgg').eval()
+        for param in self.lpips_loss.parameters():
+            param.requires_grad = False
 
         # Loss weights from config
         self.w_l1 = config.loss_l1_weight
         self.w_lap = config.loss_lap_weight
         self.w_flow = config.loss_flow_weight
         self.w_occ = config.loss_occlusion_weight
+        self.w_perc = config.loss_perceptual_weight
+
+        self.mixed_precision = config.mixed_precision
 
     def forward(self, pred, target, flow1=None, flow2=None,
-                occ1=None, occ2=None, warped1=None, warped2=None):
+                logit_occ1=None, logit_occ2=None,
+                warped1=None, warped2=None):
         """
         Compute total loss.
 
@@ -283,8 +291,8 @@ class LIFTLoss(nn.Module):
             target: Target image [B, 3, H, W]
             flow1: Flow from ref frame 1 (optional)
             flow2: Flow from ref frame 2 (optional)
-            occ1: Occlusion map 1 (optional)
-            occ2: Occlusion map 2 (optional)
+            logit_occ1: Occlusion map 1 (optional)
+            logit_occ2: Occlusion map 2 (optional)
             warped1: Warped frame 1 (optional)
             warped2: Warped frame 2 (optional)
 
@@ -297,22 +305,24 @@ class LIFTLoss(nn.Module):
         losses['l1'] = F.l1_loss(pred, target)
         losses['lap'] = self.lap_loss(pred, target)
         losses['char'] = self.char_loss(pred, target)
+        if self.mixed_precision:
+            with torch.autocast('cuda', enabled=False):
+                pred_f32 = pred.float()
+                target_f32 = target.float()
+                losses['lpips'] = self.lpips_loss(pred_f32 * 2 - 1, target_f32 * 2 - 1).mean()
+        else:
+            # LPIPS expects [-1, 1] range
+            losses['lpips'] = self.lpips_loss(pred * 2 - 1, target * 2 - 1).mean()
 
         # Flow smoothness
         if flow1 is not None and flow2 is not None:
-            losses['flow_smooth'] = (
-                self.flow_smooth_loss(flow1) +
-                self.flow_smooth_loss(flow2)
-            ) / 2.0
+            losses['flow_smooth'] = (self.flow_smooth_loss(flow1) + self.flow_smooth_loss(flow2)) / 2.0
         else:
             losses['flow_smooth'] = torch.tensor(0.0, device=pred.device)
 
         # Occlusion loss
-        if (occ1 is not None and occ2 is not None and
-            warped1 is not None and warped2 is not None):
-            losses['occlusion'] = self.occ_loss(
-                occ1, occ2, None, None, warped1, warped2, target
-            )
+        if (logit_occ1 is not None and logit_occ2 is not None and warped1 is not None and warped2 is not None):
+            losses['occlusion'] = self.occ_loss(logit_occ1, logit_occ2, warped1, warped2, target)
         else:
             losses['occlusion'] = torch.tensor(0.0, device=pred.device)
 
@@ -321,7 +331,8 @@ class LIFTLoss(nn.Module):
             self.w_l1 * losses['l1'] +
             self.w_lap * losses['lap'] +
             self.w_flow * losses['flow_smooth'] +
-            self.w_occ * losses['occlusion']
+            self.w_occ * losses['occlusion'] +
+            self.w_perc * losses['lpips']
         )
 
         return losses

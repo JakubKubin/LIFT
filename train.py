@@ -13,6 +13,9 @@ from tqdm import tqdm
 import numpy as np
 import time
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
+
 # Import all available datasets
 from dataset import (
     Vimeo15Dataset,
@@ -27,6 +30,7 @@ from configs.default import Config
 # Why: Your crop_size is fixed (e.g., 224x224).
 # This allows CuDNN to benchmark convolution algorithms once and pick the fastest one for your 4070 Ti.
 torch.backends.cudnn.benchmark = True
+torch.autograd.set_detect_anomaly(True)
 
 def get_optimizer(model, config):
     """Create AdamW optimizer."""
@@ -91,10 +95,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch,
 
         optimizer.zero_grad()
 
-        # --- HARDWARE OPTIMIZATION 2: Automatic Mixed Precision (AMP) ---
-        # Why: 4070 Ti Super has Tensor Cores. FP16 math is much faster and uses ~50% less VRAM.
-        # This allows larger batch sizes or higher resolution training.
-        with torch.autocast('cuda', enabled=True):
+        with torch.autocast('cuda', enabled=config.mixed_precision):
             # Forward pass
             outputs = model(frames, ref_frames, timestep[0].item())
             pred = outputs['prediction']
@@ -104,10 +105,10 @@ def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch,
                 pred, gt,
                 flow1=outputs['flows']['flow_31'],
                 flow2=outputs['flows']['flow_32'],
-                occ1=outputs['occlusions']['occ_31'],
-                occ2=outputs['occlusions']['occ_32'],
-                warped1=None,
-                warped2=None
+                logit_occ1=outputs['occlusions']['logit_occ_31'],
+                logit_occ2=outputs['occlusions']['logit_occ_32'],
+                warped1=outputs['warped']['warped_31'],
+                warped2=outputs['warped']['warped_32']
             )
             loss = losses['total']
 
@@ -174,8 +175,7 @@ def validate(model, dataloader, loss_fn, device, epoch, config, writer):
             gt = batch['gt'].to(device, non_blocking=True)
             timestep = batch['timestep'].to(device, non_blocking=True)
 
-            # Forward pass (AMP usually on for validation too to save memory)
-            with torch.autocast('cuda', enabled=True):
+            with torch.autocast('cuda', enabled=config.mixed_precision):
                 outputs = model(frames, ref_frames, timestep[0].item())
                 pred = outputs['prediction']
                 losses = loss_fn(pred, gt)
@@ -253,7 +253,7 @@ def main():
     # Handle num_frames override (Fixing the default.py vs LIFT requirement)
     if args.num_frames is not None:
         config.num_frames = args.num_frames
-    elif config.num_frames != 7:
+    elif config.num_frames != 15:
         print(f"WARNING: config.num_frames is {config.num_frames}. If training LIFT, you likely want --num_frames 15.")
 
     # Create directories
@@ -330,8 +330,9 @@ def main():
     print("\nCreating LIFT model...")
     model = LIFT(config).to(device)
 
-    # Initialize GradScaler for AMP
-    scaler = torch.GradScaler('cuda', enabled=True)
+    # Initialize GradScaler
+    # Jeśli mixed_precision=False, scaler będzie działał w trybie "passthrough" (nic nie robi)
+    scaler = torch.GradScaler('cuda', enabled=config.mixed_precision)
 
     # Load pretrained encoder
     if args.pretrained_encoder:
@@ -371,7 +372,24 @@ def main():
     if args.checkpoint:
         print(f"\nLoading checkpoint from {args.checkpoint}")
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model_state = model.state_dict()
+        checkpoint_state = checkpoint['model_state_dict']
+
+        # Tworzymy nowy słownik, pomijając klucze o niezgodnych wymiarach
+        new_state_dict = {}
+        for k, v in checkpoint_state.items():
+            if k in model_state:
+                if v.shape == model_state[k].shape:
+                    new_state_dict[k] = v
+                else:
+                    print(f"Skipping {k} due to shape mismatch: checkpoint {v.shape} vs model {model_state[k].shape}")
+            else:
+                # Opcjonalnie: pomijamy klucze, których nie ma w nowym modelu
+                pass
+
+        # Ładujemy przefiltrowane wagi (strict=False pozwala na brakujące klucze np. pos_enc)
+        model.load_state_dict(new_state_dict, strict=False)
+
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         global_step = checkpoint.get('global_step', 0)
@@ -397,7 +415,7 @@ def main():
         print(f"Epoch {epoch+1}: Train Loss: {train_losses['total']:.4f} (L1: {train_losses['l1']:.4f})")
 
         # Validate
-        if (epoch + 1) % config.val_interval == 0 or (epoch + 1) % 5 == 0:
+        if (epoch + 1) % config.val_interval == 0 or (epoch + 1) % 2 == 0:
             val_losses, val_psnr = validate(model, val_loader, loss_fn, device, epoch, config, writer)
             print(f"Epoch {epoch+1}: Val Loss: {val_losses['total']:.4f} | PSNR: {val_psnr:.2f} dB")
 

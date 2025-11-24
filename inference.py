@@ -13,6 +13,7 @@ import argparse
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+import torch.nn.functional as F
 
 from model import LIFT
 from configs.default import Config
@@ -43,8 +44,10 @@ def load_frames_from_directory(frame_dir, num_frames=None):
     # Limit number of frames if requested
     if num_frames is not None:
         if len(frame_paths) < num_frames:
-            raise ValueError(f"Directory contains only {len(frame_paths)} frames, need {num_frames}")
-        frame_paths = frame_paths[:num_frames]
+            # WARNING instead of Error: we will handle short sequences later
+            print(f"Warning: Directory contains only {len(frame_paths)} frames, requested {num_frames}.")
+        else:
+            frame_paths = frame_paths[:num_frames]
 
     print(f"Loading {len(frame_paths)} frames...")
 
@@ -98,13 +101,34 @@ def interpolate_sequence(model, frames, timestep=0.5, device='cuda'):
 
     with torch.no_grad():
         # LIFT inference handles the windowing internally or takes the whole sequence
-        # If T != config.num_frames, the model needs to handle it.
-        # Based on model/lift.py, it takes 'frames' and uses encoder/transformer.
-        # Ensure T matches training configuration or model supports variable T.
-        # For LIFT, we typically expect 15 frames.
         output = model.inference(frames, timestep=timestep)
 
     return output
+
+
+def pad_sequence(frames, target_length):
+    """
+    Pad sequence to target length by repeating the last frame.
+    
+    Args:
+        frames: [B, T, C, H, W]
+        target_length: int
+        
+    Returns:
+        Padded frames [B, target_length, C, H, W]
+    """
+    B, T, C, H, W = frames.shape
+    if T >= target_length:
+        return frames
+    
+    diff = target_length - T
+    print(f"Padding input sequence from {T} to {target_length} frames (repeating last frame)...")
+    
+    # Create padding by repeating the last frame
+    last_frame = frames[:, -1:].repeat(1, diff, 1, 1, 1)
+    padded = torch.cat([frames, last_frame], dim=1)
+    
+    return padded
 
 
 def run_image_mode(args, model, device, config):
@@ -112,12 +136,19 @@ def run_image_mode(args, model, device, config):
     print(f"\n--- Image Mode ---")
     print(f"Loading frames from {args.input}...")
 
-    # For single image interpolation, we typically need the context window size (e.g. 15)
-    # If user specified num_frames, use it, otherwise default to config
-    num_frames = args.num_frames if args.num_frames else config.num_frames
-
-    frames = load_frames_from_directory(args.input, num_frames=num_frames)
+    # If user specified num_frames, try to load that many.
+    # If directory has fewer, load_frames_from_directory will load what's available.
+    req_frames = args.num_frames if args.num_frames else config.num_frames
+    
+    frames = load_frames_from_directory(args.input, num_frames=req_frames)
     print(f"Loaded input tensor: {frames.shape}")
+
+    # Ensure we meet the model's requirement (usually 15 frames)
+    # If we have fewer frames than config.num_frames, the model will crash (index out of bounds)
+    # because it expects reference frames at specific indices (e.g. 6 and 7).
+    if frames.shape[1] < config.num_frames:
+        frames = pad_sequence(frames, config.num_frames)
+        print(f"Padded input tensor: {frames.shape}")
 
     # Interpolate
     print(f"Interpolating at t={args.timestep}...")
@@ -139,8 +170,6 @@ def run_video_mode(args, model, device, config):
     print(f"Loading frames from {args.input}...")
 
     # Load all frames
-    # Note: Loading ALL frames into memory might be heavy for long videos.
-    # ideally we would stream, but for simplicity we load all.
     frames = load_frames_from_directory(args.input, num_frames=args.num_frames)
     B, T, C, H, W = frames.shape
     print(f"Loaded sequence: {T} frames, {H}x{W}")
@@ -157,35 +186,12 @@ def run_video_mode(args, model, device, config):
 
     print(f"Generating video to {output_path}...")
 
-    # Sliding window approach
-    # We need 15 frames context to interpolate between frame 7 and 8 (indices)
-    # Central pair is at index (15//2)-1 and (15//2) -> 7 and 8
-
     window_size = config.num_frames # Should be 15 typically
     mid_idx = window_size // 2
-
-    # We can only interpolate where we have full context
-    # Start from index 0, take window_size
-    # We will generate 2x frames: Original[i], Interpolated[i+0.5]
 
     # Pre-convert to numpy for saving (original frames)
     frames_cpu = frames[0].permute(0, 2, 3, 1).cpu().numpy() # [T, H, W, 3]
     frames_cpu = (frames_cpu * 255).clip(0, 255).astype(np.uint8)
-
-    # Write first frame
-    # writer.write(cv2.cvtColor(frames_cpu[0], cv2.COLOR_RGB2BGR))
-
-    # Iterate
-    # For a sequence of length T and window W (e.g. 15)
-    # We can technically interpolate at many positions, but LIFT is optimized
-    # to interpolate the middle of the window.
-    # Let's assume we simply slide the window 1 frame at a time.
-    # Window i: frames[i : i+W]
-    # Interpolates between frames[i + mid-1] and frames[i + mid]
-
-    # To generate a full video, we need to pad or handle edges.
-    # For strict LIFT usage, we can only interpolate frames that have full 15-frame context.
-    # That means we can interpolate between index 7 and 8, 8 and 9, ... T-8 and T-7.
 
     valid_start = 0
     valid_end = T - window_size + 1
@@ -193,6 +199,7 @@ def run_video_mode(args, model, device, config):
     if valid_end <= 0:
         print(f"Warning: Sequence length {T} is shorter than model window {window_size}.")
         print("Cannot perform standard sliding window inference.")
+        # Optional: Handle short video with padding if needed, but usually video mode implies long sequence
         return
 
     # Write leading frames that we can't interpolate
@@ -206,15 +213,7 @@ def run_video_mode(args, model, device, config):
         window = frames[:, i : i + window_size].to(device)
 
         # Interpolate
-        # This generates frame at t=0.5 between indices (mid-1) and (mid) relative to window
-        # Absolute indices: i + mid-1 and i + mid
         interpolated = interpolate_sequence(model, window, timestep=args.timestep, device=device)
-
-        # Save Original Frame (Left reference) - already written in previous loop or pre-fill
-        # actually, we need to interleave.
-
-        # Current window produces frame between (i + 7) and (i + 8)
-        # We append Interpolated
 
         # Convert interpolated to uint8
         interp_tensor = interpolated[0].detach().cpu()
@@ -227,9 +226,6 @@ def run_video_mode(args, model, device, config):
         if next_orig_idx < T:
             frame_bgr = cv2.cvtColor(frames_cpu[next_orig_idx], cv2.COLOR_RGB2BGR)
             writer.write(frame_bgr)
-
-    # Write remaining trailing frames
-    # Not needed if loop covers everything correctly up to T-1
 
     writer.release()
     print("Video generation complete.")
@@ -272,16 +268,28 @@ def main():
             if hasattr(config, key):
                 setattr(config, key, value)
 
-    # Override config num_frames if needed for model init (though LIFT handles variable somewhat)
-    # Ideally model structure doesn't change with T, but positional embeddings might
-
     # Create model
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     model = LIFT(config).to(device)
 
-    # Load weights
-    model.load_state_dict(checkpoint['model_state_dict'])
-    print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+    # --- POPRAWKA: Bezpieczne ładowanie wag (filtrowanie mismatchu) ---
+    print(f"Loading checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+
+    model_state = model.state_dict()
+    checkpoint_state = checkpoint['model_state_dict']
+
+    # Tworzymy nowy słownik, pomijając klucze o niezgodnych wymiarach
+    new_state_dict = {}
+    for k, v in checkpoint_state.items():
+        if k in model_state:
+            if v.shape == model_state[k].shape:
+                new_state_dict[k] = v
+            else:
+                print(f"Skipping {k} due to shape mismatch: checkpoint {v.shape} vs model {model_state[k].shape}")
+
+    # Ładujemy przefiltrowane wagi (strict=False pozwala na brakujące bufory PE)
+    model.load_state_dict(new_state_dict, strict=False)
+    # ------------------------------------------------------------------
 
     if args.mode == 'image':
         run_image_mode(args, model, device, config)
@@ -291,31 +299,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-### Explanation of Changes
-
-# 1.  **Two Modes (`--mode`)**:
-#     * `image`: Similar to the old functionality. Loads a specific number of frames (defaulting to 15 from config, or user-specified via `--num_frames`) and interpolates the middle frame. This is great for testing quality on snippets.
-#     * `video`: Designed for processing longer sequences. It sets up a `cv2.VideoWriter` to create an `.mp4` file.
-
-# 2.  **`load_frames_from_directory` Update**:
-#     * Added `num_frames` argument. If `None`, it loads *all* images found in the directory. This is crucial for video mode where you might have hundreds of frames.
-#     * Added a progress bar (`tqdm`) for loading frames, as this can take time for large sequences.
-
-# 3.  **Video Generation Logic**:
-#     * Because LIFT requires a large context (15 frames), we can't just interpolate between *any* two frames easily. The script uses a **sliding window** approach.
-#     * It iterates through the video sequence. For every position, it extracts a 15-frame window centered on the gap we want to interpolate.
-#     * It writes the original frames and the interpolated frames interleaved to double the frame rate (conceptually).
-#     * **Note on Edge Cases**: With a 15-frame window, the model cannot interpolate the very first ~7 frames or the very last ~7 frames because it lacks the full context required by the architecture. The script writes these original frames without interpolation to preserve the timeline.
-
-# 4.  **Config Flexibility**:
-#     * The script attempts to respect the training configuration loaded from the checkpoint but allows overriding the number of input frames via command-line arguments.
-
-# ### Usage Examples
-
-# **1. Interpolate a single frame (like before):**
-# python inference.py --mode image \
-#     --checkpoint checkpoints/best_model.pth \
-#     --input my_frames_dir/ \
-#     --output results/ \
-#     --num_frames 15

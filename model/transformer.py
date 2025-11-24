@@ -8,8 +8,6 @@ Uses spatial patching and temporal windowing for memory efficiency.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-
 
 class DepthwiseSeparableConv(nn.Module):
     """
@@ -39,92 +37,63 @@ class DepthwiseSeparableConv(nn.Module):
         return x
 
 
-class WindowedTemporalAttention(nn.Module):
+class FullTemporalAttention(nn.Module):
     """
-    Windowed temporal self-attention.
-
-    Divides 15 frames into windows of 8 frames each and applies
-    attention within each window independently.
-
-    This reduces complexity from O(T^2) to O(T * W) where T=15, W=8.
+    Pełna atencja czasowa (Full Self-Attention).
+    Zgodnie ze specyfikacją, dla T=14 koszt obliczeniowy jest niewielki,
+    więc nie potrzebujemy okienkowania.
     """
 
-    def __init__(self, dim, num_heads=8, window_size=8, dropout=0.1):
+    def __init__(self, dim, num_heads=8, dropout=0.1):
         super().__init__()
-
-        assert dim % num_heads == 0, "dim must be divisible by num_heads"
-
-        self.dim = dim
         self.num_heads = num_heads
-        self.window_size = window_size
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
 
-        # QKV projection
         self.qkv = nn.Linear(dim, dim * 3)
-
-        # Output projection
         self.proj = nn.Linear(dim, dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         """
-        Apply windowed temporal attention.
-
         Args:
-            x: Input tensor [B, T, L, D] where
+            x: Input tensor [B, T, L, D]
                B = batch size
-               T = number of frames (15)
-               L = number of spatial tokens per frame
-               D = embedding dimension
-
-        Returns:
-            Output tensor [B, T, L, D]
+               T = liczba klatek (14)
+               L = liczba tokenów przestrzennych (np. 64 dla patch 2x2)
+               D = wymiar osadzenia (256)
         """
         B, T, L, D = x.shape
-        # Ensure T is divisible by window size, or adjust logic if T < window_size
-        # For now, we assume strict divisibility as per design or T=window_size
-        if T % self.window_size != 0:
-             # Fallback: if T is not divisible (e.g. during testing with small T), treat whole sequence as one window
-             num_windows = 1
-             eff_window_size = T
-        else:
-             num_windows = T // self.window_size
-             eff_window_size = self.window_size
 
-        # Reshape for window-wise processing
-        # [B, T, L, D] -> [B, num_windows, window_size, L, D]
-        x = x.view(B, num_windows, eff_window_size, L, D)
-
-        # Merge batch and num_windows for parallel processing
-        # [B, num_windows, window_size, L, D] -> [B*num_windows, window_size*L, D]
-        x = x.view(B * num_windows, eff_window_size * L, D)
+        # Reshape, aby atencja działała po wymiarze czasu (T) dla każdego patcha (L) niezależnie
+        # [B, T, L, D] -> [B, L, T, D] -> [B*L, T, D]
+        x = x.permute(0, 2, 1, 3).reshape(B * L, T, D)
 
         # QKV projection
-        qkv = self.qkv(x)  # [B*num_windows, window_size*L, 3*D]
-        qkv = qkv.reshape(B * num_windows, eff_window_size * L, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B*num_windows, num_heads, window_size*L, head_dim]
+        qkv = self.qkv(x)  # [B*L, T, 3*D]
+        qkv = qkv.reshape(B * L, T, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B*L, heads, T, head_dim]
 
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        # Scaled dot-product attention
-        attn = (q @ k.transpose(-2, -1)) * self.scale  # [B*num_windows, num_heads, window_size*L, window_size*L]
-        attn = attn.softmax(dim=-1)
+        # Scaled dot-product attention: Attention(Q, K, V)
+        # [B*L, heads, T, head_dim] @ [B*L, heads, head_dim, T] -> [B*L, heads, T, T]
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.float().softmax(dim=-1).type_as(q)
+
         attn = self.dropout(attn)
 
         # Apply attention to values
-        out = attn @ v  # [B*num_windows, num_heads, window_size*L, head_dim]
+        out = attn @ v  # [B*L, heads, T, head_dim]
 
         # Reshape back
-        out = out.transpose(1, 2).reshape(B * num_windows, eff_window_size * L, D)
+        out = out.transpose(1, 2).reshape(B * L, T, D) # [B*L, T, D]
 
-        # Output projection
+        # [B*L, T, D] -> [B, L, T, D] -> [B, T, L, D]
+        out = out.view(B, L, T, D).permute(0, 2, 1, 3)
+
         out = self.proj(out)
         out = self.dropout(out)
-
-        # Reshape to original shape
-        out = out.view(B, num_windows, eff_window_size, L, D)
-        out = out.view(B, T, L, D)
 
         return out
 
@@ -148,9 +117,7 @@ class TransformerBlock(nn.Module):
 
         # Temporal attention
         self.norm1 = nn.LayerNorm(dim)
-        self.temporal_attn = WindowedTemporalAttention(
-            dim, num_heads, window_size, dropout
-        )
+        self.temporal_attn = FullTemporalAttention(dim, num_heads, dropout)
 
         # Spatial processing
         self.norm2 = nn.GroupNorm(8, dim)  # GroupNorm for spatial features
@@ -180,23 +147,21 @@ class TransformerBlock(nn.Module):
         """
         B, T, L, D = x.shape
 
-        # 1. Temporal attention with residual
+        # 1. Temporal attention
         residual = x
         x = self.norm1(x)
         x = self.temporal_attn(x)
         x = x + residual
 
         # 2. Spatial processing
-        # Reshape to spatial format [B*T, D, H, W]
         x_spatial = x.view(B * T, spatial_h, spatial_w, D).permute(0, 3, 1, 2)
         residual = x_spatial
         x_spatial = self.norm2(x_spatial)
         x_spatial = self.spatial_conv(x_spatial)
         x_spatial = x_spatial + residual
-        # Reshape back to [B, T, L, D]
         x = x_spatial.permute(0, 2, 3, 1).reshape(B, T, L, D)
 
-        # 3. Feed-forward network with residual
+        # 3. FFN
         residual = x
         x = self.norm3(x)
         x = self.ffn(x)
@@ -221,7 +186,6 @@ class TemporalAggregator(nn.Module):
         self.num_layers = config.transformer_layers
         self.dim = config.transformer_dim
         self.num_heads = config.transformer_heads
-        self.window_size = config.adjusted_window_size
         self.patch_size = config.spatial_patch_size
 
         # Determine patch projection
@@ -248,7 +212,6 @@ class TemporalAggregator(nn.Module):
             TransformerBlock(
                 self.dim,
                 self.num_heads,
-                self.window_size,
                 config.transformer_dropout
             )
             for _ in range(self.num_layers)

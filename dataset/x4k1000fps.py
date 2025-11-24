@@ -36,7 +36,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
                  train_split: float = 0.8,
                  val_split: float = 0.1,
                  input_scale: float = 1.0,
-                 max_sequences: int | None = None): # Added max_sequences
+                 max_sequences: int | None = None):
         """
         Args:
             data_root: Root directory (/data/X4K1000FPS)
@@ -53,7 +53,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
 
         self.train_split = train_split
         self.val_split = val_split
-        self.max_sequences = max_sequences # Store max_sequences
+        self.max_sequences = max_sequences
 
         # Load video list
         self._load_video_list()
@@ -63,58 +63,63 @@ class X4K1000FPSDataset(BaseVideoDataset):
     def _load_video_list(self):
         """
         Load list of videos and their valid starting frames.
-
-        Creates a list of (video_path, start_frame) tuples.
+        Optimized to stop loading once max_sequences is reached.
         """
         if not self.data_root.exists():
             raise ValueError(f"Dataset not found at {self.data_root}")
 
-        all_sequences = []
-
-        # Iterate through category directories (001, 002, etc.)
+        # 1. Gather all video files first (cheap operation)
+        all_video_files = []
         category_dirs = sorted([d for d in self.data_root.iterdir() if d.is_dir()])
-
         for category_dir in category_dirs:
-            # Find all .mp4 files in this category
-            video_files = sorted(category_dir.glob('*.mp4'))
+            all_video_files.extend(sorted(category_dir.glob('*.mp4')))
 
-            for video_file in video_files:
-                try:
-                    # Get valid starting frames for this video
-                    valid_starts = self.extractor.get_valid_start_frames(
-                        str(video_file),
-                        self.num_frames
-                    )
-
-                    # Add all possible sequences from this video
-                    for start_frame in valid_starts:
-                        all_sequences.append((str(video_file), start_frame))
-
-                except Exception as e:
-                    # print(f"Warning: Error processing {video_file}: {e}")
-                    continue
-
-        if len(all_sequences) == 0:
+        if not all_video_files:
             raise ValueError(f"No valid video sequences found in {self.data_root}")
 
-        # Shuffle with fixed seed for reproducibility
-        random.Random(42).shuffle(all_sequences)
+        # 2. Shuffle videos (fixed seed for consistency across train/val modes)
+        # We split VIDEOS, not sequences, to prevent data leakage
+        random.Random(42).shuffle(all_video_files)
 
-        # Split into train/val/test
-        total = len(all_sequences)
-        train_end = int(total * self.train_split)
-        val_end = train_end + int(total * self.val_split)
+        # 3. Split videos into train/val/test
+        total_videos = len(all_video_files)
+        train_end = int(total_videos * self.train_split)
+        val_end = train_end + int(total_videos * self.val_split)
 
         if self.mode == 'train':
-            self.video_list = all_sequences[:train_end]
+            videos_to_process = all_video_files[:train_end]
         elif self.mode == 'val':
-            self.video_list = all_sequences[train_end:val_end]
+            videos_to_process = all_video_files[train_end:val_end]
         else:  # test
-            self.video_list = all_sequences[val_end:]
+            videos_to_process = all_video_files[val_end:]
 
-        # Apply max_sequences limit
-        if self.max_sequences is not None:
-            self.video_list = self.video_list[:self.max_sequences]
+        # 4. Process videos and collect sequences until limit is reached
+        self.video_list = []
+
+        for video_file in videos_to_process:
+            # Check limit before processing the video
+            if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
+                break
+
+            try:
+                # Get valid starting frames for this video
+                # This opens the video file, so we only do it for needed videos
+                valid_starts = self.extractor.get_valid_start_frames(
+                    str(video_file),
+                    self.num_frames
+                )
+
+                # Add all valid sequences from this video
+                for start_frame in valid_starts:
+                    self.video_list.append((str(video_file), start_frame))
+
+                    # Check limit after each addition
+                    if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
+                        break
+
+            except Exception as e:
+                # print(f"Warning: Error processing {video_file}: {e}")
+                continue
 
     def __getitem__(self, idx):
         """
@@ -219,7 +224,7 @@ if __name__ == '__main__':
             crop_size=(224, 224),
             augment=True,
             cache_frames=False,
-            max_sequences=50 # Test limit
+            max_sequences=50
         )
 
         print(f"Dataset loaded successfully!")

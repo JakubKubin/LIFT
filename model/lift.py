@@ -140,6 +140,12 @@ class LIFT(nn.Module):
             'occlusions': {
                 'occ_31': flow_output['occ_31'],
                 'occ_32': flow_output['occ_32'],
+                'logit_occ_31': flow_output['logit_occ_31'],
+                'logit_occ_32': flow_output['logit_occ_32'],
+            },
+            'warped': {
+                'warped_31': synthesis_output['warped_31'],
+                'warped_32': synthesis_output['warped_32'],
             },
             'attention_weights': attention_weights,
         }

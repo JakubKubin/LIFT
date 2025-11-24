@@ -21,13 +21,12 @@ class Config:
         's8': 192,
         's16': 256
     }
-    freeze_encoder_epochs = 10  # Freeze encoder for first N epochs
+    freeze_encoder_epochs = 2  # Freeze encoder for first N epochs was 10
 
     # Stage 2: Transformer
-    transformer_layers = 4
+    transformer_layers = 3
     transformer_dim = 256
     transformer_heads = 8
-    temporal_window_size = 8  # Frames per window
     spatial_patch_size = 2
     transformer_dropout = 0.1
 
@@ -46,7 +45,7 @@ class Config:
     refine_reduce_channels = 32  # Reduce from 128 to this
 
     # Training parameters
-    batch_size = 50
+    batch_size = 10
     num_epochs = 20
     learning_rate = 3e-4
     weight_decay = 1e-3
@@ -58,15 +57,16 @@ class Config:
     loss_lap_weight = 1.0
     loss_flow_weight = 0.01
     loss_occlusion_weight = 0.1
+    loss_perceptual_weight = 0.1
 
     # Optimization
     gradient_clip = 1.0
-    mixed_precision = True  # Use automatic mixed precision
+    mixed_precision = False
 
     # DataLoader parameters
-    num_workers = 16
+    num_workers = 12
     pin_memory = True
-    prefetch_factor = 2
+    prefetch_factor = 1
 
     # Logging and checkpointing
     log_dir = 'logs'
@@ -149,22 +149,5 @@ class Config:
         # The formula [mid-1, mid] works for both cases relative to the reduced input tensor
         return [mid - 1, mid]
 
-    @property
-    def adjusted_window_size(self):
-        """Ensure window size divides model_frames."""
-        T = self.model_frames
-        W = self.temporal_window_size
-
-        # If default window doesn't fit, try to find a good divisor
-        if T % W != 0:
-            # If sequence is short (e.g. 6), window is the sequence
-            if T < W:
-                return T
-            # Otherwise find largest divisor <= default W
-            for w in range(W, 0, -1):
-                if T % w == 0:
-                    return w
-            return 1 # Fallback
-        return W
 # Create default config instance
 default_config = Config()

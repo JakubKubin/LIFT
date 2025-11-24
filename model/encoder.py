@@ -189,33 +189,33 @@ class FrameEncoder(nn.Module):
     Memory optimization:
     - Processes frames one at a time (or in small batches)
     - Only keeps s16 features for all frames
-    - Only keeps s4, s8 features for reference frames (31, 32)
+    - Only keeps s4, s8 features for reference frames (7, 9)
     """
 
     def __init__(self, config):
         super().__init__()
 
         self.config = config
-        self.num_frames = config.model_frames
+        self.num_frames = config.model_frames # 14 (frames to process)
+        self.total_frames = config.num_frames # 15 (total temporal positions)
 
         # Shared encoder for all frames
         self.encoder = FeatureEncoder(config)
 
         # Positional encodings for each scale
         self.pos_enc_s4 = PositionalEncoding(
-            self.num_frames,
+            self.total_frames,
             config.encoder_channels['s4']
         )
         self.pos_enc_s8 = PositionalEncoding(
-            self.num_frames,
+            self.total_frames,
             config.encoder_channels['s8']
         )
         self.pos_enc_s16 = PositionalEncoding(
-            self.num_frames,
+            self.total_frames,
             config.encoder_channels['s16']
         )
 
-        # Reference frame
         self.ref_indices = config.ref_indices
 
     def forward(self, frames):
@@ -237,56 +237,59 @@ class FrameEncoder(nn.Module):
         """
         B, T, C, H, W = frames.shape
 
-        # Dynamic check to allow flexibility in tests
-        # assert T == self.num_frames, f"Expected {self.num_frames} frames, got {T}"
-
         # Storage for features
-        device = frames.device
         feats_s16_list = []
         ref_feats_s4 = []
         ref_feats_s8 = []
 
-        # Process each frame sequentially for memory efficiency
+        # Logika wyznaczania "prawdziwego" indeksu czasowego
+        # Jeśli mamy 14 klatek (trening), zakładamy brak klatki środkowej.
+        # Jeśli mamy 15 klatek (test/inference z GT), indeksy są ciągłe.
+        is_training_mode = (T == self.num_frames - 1) # np. 14 klatek przy num_frames=15
+        mid_idx = self.num_frames // 2  # np. 7 dla 15 klatek
+
         for t in range(T):
-            # Extract single frame [B, 3, H, W]
+            # Extract single frame
             frame_t = frames[:, t]
 
-            # Extract features at all scales
+            # Extract features
             feats = self.encoder(frame_t)
 
-            # Add positional encoding to s16 features
-            # Use t % self.num_frames to handle cases where T != num_frames (e.g. testing)
-            pos_idx = t if t < self.num_frames else t % self.num_frames
+            # Obliczanie indeksu pozycyjnego (Positional Index)
+            if is_training_mode:
+                # Skip middle frame index (8th frame, index 7)
+                # Input t: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+                # Real t:  0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14
+                real_t = t if t < mid_idx else t + 1
+            else:
+                real_t = t
 
-            feat_s16 = self.pos_enc_s16(feats['s16'], pos_idx)
+            # Add positional encoding using REAL time index
+            # Używamy real_t zamiast t
+            feat_s16 = self.pos_enc_s16(feats['s16'], real_t)
             feats_s16_list.append(feat_s16)
 
             # Store s4 and s8 features only for reference frames
-            # For test with random frames, just use first and last as ref if indices out of bounds
-            is_ref = False
+            # Musimy sprawdzić, czy obecne t odpowiada indeksom referencyjnym
+            # self.ref_indices w configu odnosi się do indeksów w tensorze WEJŚCIOWYM
             if t in self.ref_indices:
-                is_ref = True
-
-            if is_ref:
-                feat_s4 = self.pos_enc_s4(feats['s4'], pos_idx)
-                feat_s8 = self.pos_enc_s8(feats['s8'], pos_idx)
+                feat_s4 = self.pos_enc_s4(feats['s4'], real_t)
+                feat_s8 = self.pos_enc_s8(feats['s8'], real_t)
                 ref_feats_s4.append(feat_s4)
                 ref_feats_s8.append(feat_s8)
 
-        # Fallback if no ref frames found (e.g. short test sequence)
+        # Fallback (zachowanie z oryginału)
         if len(ref_feats_s4) == 0:
-             # Use first two frames as dummy refs
              for t in [0, 1]:
                  if t < T:
-                    frame_t = frames[:, t]
-                    feats = self.encoder(frame_t)
+                    feats = self.encoder(frames[:, t])
                     ref_feats_s4.append(feats['s4'])
                     ref_feats_s8.append(feats['s8'])
 
-        # Stack features along temporal dimension
-        feats_s16 = torch.stack(feats_s16_list, dim=1)  # [B, 15, C, H/16, W/16]
-        ref_feats_s4 = torch.stack(ref_feats_s4, dim=1)  # [B, 2, C, H/4, W/4]
-        ref_feats_s8 = torch.stack(ref_feats_s8, dim=1)  # [B, 2, C, H/8, W/8]
+        # Stack features
+        feats_s16 = torch.stack(feats_s16_list, dim=1)
+        ref_feats_s4 = torch.stack(ref_feats_s4, dim=1)
+        ref_feats_s8 = torch.stack(ref_feats_s8, dim=1)
 
         return {
             'feats_s16': feats_s16,
@@ -303,10 +306,8 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Create test input dynamically
-    num_test = config.model_frames
+    num_test = 14
     frames = torch.rand(2, num_test, 3, 256, 256).to(device)
-
-    # Create encoder
     encoder = FrameEncoder(config).to(device)
 
     # Forward pass

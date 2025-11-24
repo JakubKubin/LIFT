@@ -89,75 +89,86 @@ class UCF101Dataset(BaseVideoDataset):
         return video_names
 
     def _load_video_list(self):
-        """Load list of videos and their valid starting frames."""
+        """
+        Load list of videos and their valid starting frames.
+        Optimized to stop loading once max_sequences is reached.
+        """
         if not self.data_root.exists():
             raise ValueError(f"Dataset not found at {self.data_root}")
 
-        all_sequences = []
-
-        # Get list of action categories (directories)
+        # 1. Collect all video paths first (cheap operation)
+        all_video_paths = []
         action_dirs = sorted([d for d in self.data_root.iterdir() if d.is_dir()])
 
-        # Load official splits if requested
-        if self.use_official_splits:
-            official_videos = self._load_official_split()
-            official_set = set(official_videos)
-        else:
-            official_set = None
-
         for action_dir in action_dirs:
+            # We just collect paths here, don't open videos yet
             video_files = sorted(action_dir.glob('*.avi'))
+            all_video_paths.extend(video_files)
 
-            for video_file in video_files:
-                # Check if this video is in the official split (if using)
-                if official_set is not None:
-                    relative_path = f"{action_dir.name}/{video_file.name}"
-                    if relative_path not in official_set:
-                        continue
+        if not all_video_paths:
+             raise ValueError(f"No valid video sequences found in {self.data_root}")
 
-                try:
-                    # Get valid starting frames for this video
-                    valid_starts = self.extractor.get_valid_start_frames(
-                        str(video_file),
-                        self.num_frames
-                    )
+        # 2. Filter/Split Videos
+        videos_to_process = []
 
-                    # Add all possible sequences from this video
-                    for start_frame in valid_starts:
-                        all_sequences.append((str(video_file), start_frame))
-
-                except Exception as e:
-                    print(f"Warning: Error processing {video_file}: {e}")
-                    continue
-
-        if len(all_sequences) == 0:
-            raise ValueError(f"No valid video sequences found in {self.data_root}")
-
-        # Shuffle with fixed seed for reproducibility BEFORE splitting or limiting
-        random.Random(config.seed).shuffle(all_sequences)
-
-        # If using official splits, we're done (unless limiting)
         if self.use_official_splits:
-            self.video_list = all_sequences
-            if self.max_sequences is not None:
-                 self.video_list = self.video_list[:self.max_sequences]
-            return
+            # Load official split list
+            official_videos = set(self._load_official_split())
 
-        # Otherwise, create custom train/val/test split
-        total = len(all_sequences)
-        train_end = int(total * self.train_split)
-        val_end = train_end + int(total * self.val_split)
+            # Filter all_video_paths to keep only those in official list
+            filtered_videos = []
+            for v_path in all_video_paths:
+                # v_path is absolute path. We need "Action/Video.avi"
+                rel_path = f"{v_path.parent.name}/{v_path.name}"
+                if rel_path in official_videos:
+                    filtered_videos.append(v_path)
 
-        if self.mode == 'train':
-            self.video_list = all_sequences[:train_end]
-        elif self.mode == 'val':
-            self.video_list = all_sequences[train_end:val_end]
-        else:  # test
-            self.video_list = all_sequences[val_end:]
+            # Shuffle filtered videos to ensure random subset if max_sequences is used
+            random.Random(config.seed).shuffle(filtered_videos)
+            videos_to_process = filtered_videos
 
-        # Apply max_sequences limit AFTER splitting
-        if self.max_sequences is not None:
-            self.video_list = self.video_list[:self.max_sequences]
+        else:
+            # Custom Split: Shuffle and Split VIDEOS
+            # This prevents data leakage (sequences from same video in train and val)
+            random.Random(config.seed).shuffle(all_video_paths)
+
+            total_videos = len(all_video_paths)
+            train_end = int(total_videos * self.train_split)
+            val_end = train_end + int(total_videos * self.val_split)
+
+            if self.mode == 'train':
+                videos_to_process = all_video_paths[:train_end]
+            elif self.mode == 'val':
+                videos_to_process = all_video_paths[train_end:val_end]
+            else: # test
+                videos_to_process = all_video_paths[val_end:]
+
+        # 3. Extract Sequences from selected videos until limit
+        self.video_list = []
+
+        for video_path in videos_to_process:
+            # Check limit before processing the video
+            if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
+                break
+
+            try:
+                # Get valid starting frames (This opens the video file - expensive)
+                valid_starts = self.extractor.get_valid_start_frames(
+                    str(video_path),
+                    self.num_frames
+                )
+
+                # Add all valid sequences from this video
+                for start_frame in valid_starts:
+                     self.video_list.append((str(video_path), start_frame))
+
+                     # Check limit after each addition
+                     if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
+                        break
+
+            except Exception as e:
+                # print(f"Warning: Error processing {video_path}: {e}")
+                continue
 
     def __getitem__(self, idx):
         """
