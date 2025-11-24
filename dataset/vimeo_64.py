@@ -27,7 +27,8 @@ class Vimeo64Dataset(Dataset):
                  num_frames=64,
                  crop_size=(224, 224),
                  augment=True,
-                 input_scale=1.0):
+                 input_scale=1.0,
+                 max_sequences=None): # Added max_sequences
         """
         Args:
             data_root: Root directory containing video sequences
@@ -35,6 +36,7 @@ class Vimeo64Dataset(Dataset):
             num_frames: Number of frames to load (default 64)
             crop_size: Tuple of (height, width) for random crop
             augment: Whether to apply data augmentation
+            max_sequences: Maximum number of sequences to load (for debugging or limiting dataset size)
         """
         self.data_root = Path(data_root)
         self.mode = mode
@@ -42,6 +44,7 @@ class Vimeo64Dataset(Dataset):
         self.crop_size = crop_size
         self.augment = augment and (mode == 'train')
         self.input_scale = input_scale
+        self.max_sequences = max_sequences # Store it
 
         # Reference frames
         mid = self.num_frames // 2
@@ -90,6 +93,13 @@ class Vimeo64Dataset(Dataset):
             sequences = sequences[:int(len(sequences) * 0.95)]
         elif self.mode == 'val':
             sequences = sequences[int(len(sequences) * 0.95):]
+
+        # Apply max_sequences limit
+        if self.max_sequences is not None:
+            # Shuffle to ensure we get a random subset
+            # Using a fixed seed for reproducibility if needed, but random.shuffle is fine here
+            random.shuffle(sequences) 
+            sequences = sequences[:self.max_sequences]
 
         return sequences
 
@@ -256,7 +266,8 @@ class VideoSequenceDataset(Dataset):
                  num_frames=64,
                  crop_size=(224, 224),
                  augment=True,
-                 input_scale=1.0):
+                 input_scale=1.0,
+                 max_sequences=None): # Added max_sequences
         """
         Args:
             video_list_file: Text file containing list of video paths
@@ -264,12 +275,14 @@ class VideoSequenceDataset(Dataset):
             num_frames: Number of frames to extract from each video
             crop_size: Tuple of (height, width) for random crop
             augment: Whether to apply data augmentation
+            max_sequences: Maximum number of sequences to load
         """
         self.mode = mode
         self.num_frames = num_frames
         self.crop_size = crop_size
         self.augment = augment and (mode == 'train')
         self.input_scale = input_scale
+        self.max_sequences = max_sequences
 
         # Load video paths
         with open(video_list_file, 'r') as f:
@@ -280,6 +293,11 @@ class VideoSequenceDataset(Dataset):
             self.video_paths = self.video_paths[:int(len(self.video_paths) * 0.95)]
         elif mode == 'val':
             self.video_paths = self.video_paths[int(len(self.video_paths) * 0.95):]
+            
+        # Apply max_sequences limit
+        if self.max_sequences is not None:
+            random.shuffle(self.video_paths)
+            self.video_paths = self.video_paths[:self.max_sequences]
 
         print(f"Loaded {len(self.video_paths)} videos for {mode}")
 

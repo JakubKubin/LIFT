@@ -1,7 +1,6 @@
 """
 Training script for LIFT model.
-
-Complete implementation with all stages integrated.
+Optimized for Intel i7-14700K (20 Cores) + NVIDIA RTX 4070 Ti Super (16GB).
 """
 
 import os
@@ -12,11 +11,22 @@ from torch.utils.tensorboard import SummaryWriter
 import argparse
 from tqdm import tqdm
 import numpy as np
+import time
 
-from dataset import Vimeo64Dataset, collate_fn
+# Import all available datasets
+from dataset import (
+    Vimeo64Dataset,
+    X4K1000FPSDataset,
+    UCF101Dataset,
+    collate_fn
+)
 from model import LIFT, LIFTLoss
 from configs.default import Config
 
+# --- HARDWARE OPTIMIZATION 1: CuDNN Benchmark ---
+# Why: Your crop_size is fixed (e.g., 224x224).
+# This allows CuDNN to benchmark convolution algorithms once and pick the fastest one for your 4070 Ti.
+torch.backends.cudnn.benchmark = True
 
 def get_optimizer(model, config):
     """Create AdamW optimizer."""
@@ -56,7 +66,7 @@ def compute_psnr(pred, target) -> torch.Tensor:
     return -10 * torch.log10(mse)
 
 
-def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch, config, writer, global_step):
+def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch, config, writer, global_step, scaler):
     """Train for one epoch."""
     model.train()
     model.set_epoch(epoch)  # Handle encoder freezing
@@ -73,36 +83,44 @@ def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch,
     pbar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
 
     for step, batch in enumerate(pbar):
-        # Move data to device
-        frames = batch['frames'].to(device)          # [B, 64, 3, H, W]
-        ref_frames = batch['ref_frames'].to(device)  # [B, 2, 3, H, W]
-        gt = batch['gt'].to(device)                  # [B, 3, H, W]
-        timestep = batch['timestep'].to(device)      # [B]
+        # Move data to device (Non-blocking allows overlap with computation)
+        frames = batch['frames'].to(device, non_blocking=True)
+        ref_frames = batch['ref_frames'].to(device, non_blocking=True)
+        gt = batch['gt'].to(device, non_blocking=True)
+        timestep = batch['timestep'].to(device, non_blocking=True)
 
-        # Forward pass
-        outputs = model(frames, ref_frames, timestep[0].item())
-        pred = outputs['prediction']
-
-        # Compute loss
-        losses = loss_fn(
-            pred, gt,
-            flow1=outputs['flows']['flow_31'],
-            flow2=outputs['flows']['flow_32'],
-            occ1=outputs['occlusions']['occ_31'],
-            occ2=outputs['occlusions']['occ_32'],
-            warped1=None,  # Can add warped frames for occlusion loss
-            warped2=None
-        )
-        loss = losses['total']
-
-        # Backward pass
         optimizer.zero_grad()
-        loss.backward()
 
-        # Gradient clipping
+        # --- HARDWARE OPTIMIZATION 2: Automatic Mixed Precision (AMP) ---
+        # Why: 4070 Ti Super has Tensor Cores. FP16 math is much faster and uses ~50% less VRAM.
+        # This allows larger batch sizes or higher resolution training.
+        with torch.autocast('cuda', enabled=True):
+            # Forward pass
+            outputs = model(frames, ref_frames, timestep[0].item())
+            pred = outputs['prediction']
+
+            # Compute loss
+            losses = loss_fn(
+                pred, gt,
+                flow1=outputs['flows']['flow_31'],
+                flow2=outputs['flows']['flow_32'],
+                occ1=outputs['occlusions']['occ_31'],
+                occ2=outputs['occlusions']['occ_32'],
+                warped1=None,
+                warped2=None
+            )
+            loss = losses['total']
+
+        # Backward pass with gradient scaling (prevents underflow in FP16)
+        scaler.scale(loss).backward()
+
+        # Gradient clipping (unscale first)
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip)
 
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
+
         scheduler.step()
 
         # Accumulate losses
@@ -124,9 +142,10 @@ def train_epoch(model, dataloader, optimizer, scheduler, loss_fn, device, epoch,
             writer.add_scalar('train/loss_lap', losses['lap'].item(), global_step)
             writer.add_scalar('train/lr', scheduler.get_last_lr()[0], global_step)
 
-            # Log attention weights visualization
-            attn = outputs['attention_weights'][0].detach().cpu().numpy()
-            writer.add_histogram('train/attention_weights', attn, global_step)
+            # Optional: Log VRAM usage
+            if step % 100 == 0:
+                vram_gb = torch.cuda.memory_allocated() / 1e9
+                writer.add_scalar('system/vram_gb', vram_gb, global_step)
 
         global_step += 1
 
@@ -150,20 +169,19 @@ def validate(model, dataloader, loss_fn, device, epoch, config, writer):
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Validation"):
-            frames = batch['frames'].to(device)
-            ref_frames = batch['ref_frames'].to(device)
-            gt = batch['gt'].to(device)
-            timestep = batch['timestep'].to(device)
+            frames = batch['frames'].to(device, non_blocking=True)
+            ref_frames = batch['ref_frames'].to(device, non_blocking=True)
+            gt = batch['gt'].to(device, non_blocking=True)
+            timestep = batch['timestep'].to(device, non_blocking=True)
 
-            # Forward pass
-            outputs = model(frames, ref_frames, timestep[0].item())
-            pred = outputs['prediction']
+            # Forward pass (AMP usually on for validation too to save memory)
+            with torch.autocast('cuda', enabled=True):
+                outputs = model(frames, ref_frames, timestep[0].item())
+                pred = outputs['prediction']
+                losses = loss_fn(pred, gt)
 
-            # Compute loss
-            losses = loss_fn(pred, gt)
-
-            # Compute PSNR
-            psnr = compute_psnr(pred, gt)
+            # Compute PSNR (ensure float32 for accuracy)
+            psnr = compute_psnr(pred.float(), gt.float())
 
             # Accumulate
             for key in total_losses.keys():
@@ -184,14 +202,27 @@ def validate(model, dataloader, loss_fn, device, epoch, config, writer):
     return avg_losses, avg_psnr
 
 
+def get_dataset_class(dataset_name):
+    """Factory function to get the correct dataset class."""
+    if dataset_name.lower() == 'vimeo':
+        return Vimeo64Dataset
+    elif dataset_name.lower() == 'x4k':
+        return X4K1000FPSDataset
+    elif dataset_name.lower() == 'ucf101':
+        return UCF101Dataset
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}. Choices: vimeo, x4k, ucf101")
+
+
 def main():
     import sys
-    # sys.path.append('..') # Not needed if running from root
     from configs.default import Config
 
     parser = argparse.ArgumentParser(description='Train LIFT model')
     parser.add_argument('--data_root', type=str, required=True,
                         help='Path to dataset root directory')
+    parser.add_argument('--dataset', type=str, default='vimeo', choices=['vimeo', 'x4k', 'ucf101'],
+                        help='Dataset type (vimeo, x4k, ucf101)')
     parser.add_argument('--batch_size', type=int, default=None,
                         help='Batch size for training (overrides config)')
     parser.add_argument('--num_epochs', type=int, default=None,
@@ -200,6 +231,12 @@ def main():
                         help='Path to checkpoint to resume from')
     parser.add_argument('--pretrained_encoder', type=str, default=None,
                         help='Path to pretrained encoder weights')
+    parser.add_argument('--num_workers', type=int, default=None,
+                        help='Number of dataloader workers (overrides config)')
+    parser.add_argument('--num_frames', type=int, default=None,
+                        help='Override number of frames (default from config is 7, but LIFT needs 64)')
+    parser.add_argument('--max_sequences', type=int, default=None,
+                    help='Limit total number of sequences per dataset (train/val)')
     args = parser.parse_args()
 
     # Configuration
@@ -210,33 +247,57 @@ def main():
     if args.num_epochs is not None:
         config.num_epochs = args.num_epochs
 
+    # --- HARDWARE OPTIMIZATION 3: Num Workers ---
+    # Default config might use 4. Your i7-14700K has 20 cores / 28 threads.
+    # We can safely increase this to feed the GPU faster.
+    # However, 32GB RAM means we shouldn't go too crazy (each worker consumes RAM).
+    if args.num_workers is not None:
+        config.num_workers = args.num_workers
+
+    # Handle num_frames override (Fixing the default.py vs LIFT requirement)
+    if args.num_frames is not None:
+        config.num_frames = args.num_frames
+    elif config.num_frames == 7:
+        # Config default is 7 (for RIFE compat), but LIFT usually wants 64.
+        # We'll warn the user but stick to config unless they passed --num_frames
+        print(f"WARNING: config.num_frames is {config.num_frames}. If training LIFT, you likely want --num_frames 64.")
+
     # Create directories
     os.makedirs(config.log_dir, exist_ok=True)
     os.makedirs(config.checkpoint_dir, exist_ok=True)
 
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    print(f"Using device: {device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
 
     # Create datasets
-    print("\nLoading datasets...")
-    train_dataset = Vimeo64Dataset(
-        data_root=config.data_root,
-        mode='train',
-        num_frames=config.num_frames,
-        crop_size=config.crop_size,
-        augment=True,
-        input_scale=config.input_scale
-    )
+    print(f"\nLoading {args.dataset.upper()} datasets from {config.data_root}...")
 
-    val_dataset = Vimeo64Dataset(
-        data_root=config.data_root,
-        mode='val',
-        num_frames=config.num_frames,
-        crop_size=config.crop_size,  # Use same size for validation
-        augment=False,
-        input_scale=config.input_scale
-    )
+    DatasetClass = get_dataset_class(args.dataset)
+
+    try:
+        train_dataset = DatasetClass(
+            data_root=config.data_root,
+            mode='train',
+            num_frames=config.num_frames,
+            crop_size=config.crop_size,
+            augment=True,
+            input_scale=config.input_scale,
+            max_sequences=args.max_sequences
+        )
+
+        val_dataset = DatasetClass(
+            data_root=config.data_root,
+            mode='val',
+            num_frames=config.num_frames,
+            crop_size=config.crop_size,
+            augment=False,
+            input_scale=config.input_scale,
+            max_sequences=args.max_sequences
+        )
+    except ValueError as e:
+        print(f"Error loading dataset: {e}")
+        return
 
     print(f"Train samples: {len(train_dataset)}")
     print(f"Val samples: {len(val_dataset)}")
@@ -244,15 +305,20 @@ def main():
     if len(train_dataset) == 0:
         raise ValueError(f"No training samples found in {config.data_root}. Check directory structure.")
 
-    # Create data loaders
+    # --- HARDWARE OPTIMIZATION 4: DataLoader Settings ---
+    # persistent_workers=True: Keeps worker processes alive between epochs. 
+    # This is crucial for short epochs or when worker startup time is high (typical with 64 frames/large libraries).
+    # prefetch_factor=2: Buffers 2 batches per worker to ensure GPU always has data.
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
-        pin_memory=config.pin_memory,
+        pin_memory=True, # Critical for NVMe -> GPU speed
         drop_last=True,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        persistent_workers=True,
+        prefetch_factor=2
     )
 
     val_loader = DataLoader(
@@ -260,57 +326,52 @@ def main():
         batch_size=config.batch_size,
         shuffle=False,
         num_workers=config.num_workers,
-        pin_memory=config.pin_memory,
-        collate_fn=collate_fn
+        pin_memory=True,
+        collate_fn=collate_fn,
+        persistent_workers=True,
+        prefetch_factor=2
     )
 
     # Create model
     print("\nCreating LIFT model...")
     model = LIFT(config).to(device)
 
-    # Load pretrained encoder if provided
+    # Initialize GradScaler for AMP
+    scaler = torch.GradScaler('cuda', enabled=True)
+
+    # Load pretrained encoder
     if args.pretrained_encoder:
         print(f"Loading pretrained encoder from {args.pretrained_encoder}")
         checkpoint = torch.load(args.pretrained_encoder, map_location=device)
-        
-        # Handle potential key mismatches if loading from standard RIFE
+
         encoder_state = {}
         for k, v in checkpoint.items():
-            # If checkpoint keys start with 'module.', remove it (DataParallel)
-            if k.startswith('module.'):
-                k = k[7:]
-            # If loading direct RIFE weights, keys might need adjustment
-            # This assumes checkpoint contains exactly the encoder state dict
+            if k.startswith('module.'): k = k[7:]
             encoder_state[k] = v
-            
-        # If keys in checkpoint have 'encoder.' prefix, remove it to match model.encoder
+
         encoder_state = {
             k.replace('encoder.', ''): v
             for k, v in encoder_state.items()
             if 'encoder.' in k or k in model.encoder.state_dict()
         }
-        
         try:
             model.encoder.load_state_dict(encoder_state, strict=False)
             print("Pretrained encoder loaded successfully")
         except Exception as e:
             print(f"Warning: Failed to load some encoder weights: {e}")
 
-    # Print model info
+    # Print info
     params = model.count_parameters()
-    print(f"\nModel parameters:")
-    print(f"  Total: {params['total']:,}")
-    print(f"  Trainable: {params['trainable']:,}")
-    print(f"  Frozen: {params['frozen']:,}")
+    print(f"\nModel parameters: Total: {params['total']:,}")
 
-    # Create optimizer and scheduler
     optimizer = get_optimizer(model, config)
     scheduler = get_lr_scheduler(optimizer, config, len(train_loader))
 
-    # Create loss function
-    loss_fn = LIFTLoss(config)
+    # --- FIX: Move loss function to GPU ---
+    # The previous error was because loss buffers (kernels) were on CPU.
+    loss_fn = LIFTLoss(config).to(device)
 
-    # Load checkpoint if resuming
+    # Load checkpoint
     start_epoch = 0
     global_step = 0
     if args.checkpoint:
@@ -320,70 +381,58 @@ def main():
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         global_step = checkpoint.get('global_step', 0)
+        if 'scaler_state_dict' in checkpoint:
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
         print(f"Resuming from epoch {start_epoch}")
 
-    # TensorBoard writer
     writer = SummaryWriter(config.log_dir)
 
-    # Training loop
     print("\n" + "="*60)
-    print("Starting training...")
+    print(f"Starting training on {config.num_epochs} epochs...")
+    print(f"Batch Size: {config.batch_size} | Workers: {config.num_workers} | AMP: Enabled")
     print("="*60)
+    
     best_val_loss = float('inf')
 
     for epoch in range(start_epoch, config.num_epochs):
-        print(f"\nEpoch {epoch + 1}/{config.num_epochs}")
-
         # Train
         train_losses, global_step = train_epoch(
             model, train_loader, optimizer, scheduler,
-            loss_fn, device, epoch, config, writer, global_step
+            loss_fn, device, epoch, config, writer, global_step, scaler
         )
-        print(f"Train - Loss: {train_losses['total']:.4f}, L1: {train_losses['l1']:.4f}, Lap: {train_losses['lap']:.4f}")
+        print(f"Epoch {epoch+1}: Train Loss: {train_losses['total']:.4f} (L1: {train_losses['l1']:.4f})")
 
-        # Validate based on config interval
-        if (epoch + 1) % config.val_interval == 0:
+        # Validate
+        if (epoch + 1) % config.val_interval == 0 or (epoch + 1) % 5 == 0:
             val_losses, val_psnr = validate(model, val_loader, loss_fn, device, epoch, config, writer)
-            print(f"Val - Loss: {val_losses['total']:.4f}, PSNR: {val_psnr:.2f} dB")
+            print(f"Epoch {epoch+1}: Val Loss: {val_losses['total']:.4f} | PSNR: {val_psnr:.2f} dB")
 
-            # Save best model
             if val_losses['total'] < best_val_loss:
                 best_val_loss = val_losses['total']
-                checkpoint_path = os.path.join(
-                    config.checkpoint_dir,
-                    f'best_model.pth'
-                )
                 torch.save({
                     'epoch': epoch,
                     'global_step': global_step,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
+                    'scaler_state_dict': scaler.state_dict(),
                     'val_loss': val_losses['total'],
                     'val_psnr': val_psnr,
                     'config': config.to_dict(),
-                }, checkpoint_path)
+                }, os.path.join(config.checkpoint_dir, 'best_model.pth'))
                 print(f"Saved best model (val_loss: {best_val_loss:.4f})")
 
-        # Save checkpoint every 10 epochs (or custom interval if preferred)
         if (epoch + 1) % 10 == 0:
-            checkpoint_path = os.path.join(
-                config.checkpoint_dir,
-                f'checkpoint_epoch_{epoch+1}.pth'
-            )
             torch.save({
                 'epoch': epoch,
                 'global_step': global_step,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scaler_state_dict': scaler.state_dict(),
                 'config': config.to_dict(),
-            }, checkpoint_path)
-            print(f"Saved checkpoint at epoch {epoch + 1}")
+            }, os.path.join(config.checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth'))
 
     writer.close()
-    print("\n" + "="*60)
     print("Training complete!")
-    print("="*60)
-
 
 if __name__ == '__main__':
     main()

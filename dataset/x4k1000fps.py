@@ -35,7 +35,8 @@ class X4K1000FPSDataset(BaseVideoDataset):
                  cache_frames: bool = False,
                  train_split: float = 0.8,
                  val_split: float = 0.1,
-                 input_scale: float = 1.0):
+                 input_scale: float = 1.0,
+                 max_sequences: int | None = None): # Added max_sequences
         """
         Args:
             data_root: Root directory (/data/X4K1000FPS)
@@ -46,11 +47,13 @@ class X4K1000FPSDataset(BaseVideoDataset):
             cache_frames: Cache extracted frames (memory intensive)
             train_split: Fraction of videos for training (0.8 = 80%)
             val_split: Fraction of videos for validation (0.1 = 10%)
+            max_sequences: Limit number of sequences (train/val)
         """
         super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames, input_scale)
 
         self.train_split = train_split
         self.val_split = val_split
+        self.max_sequences = max_sequences # Store max_sequences
 
         # Load video list
         self._load_video_list()
@@ -88,7 +91,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
                         all_sequences.append((str(video_file), start_frame))
 
                 except Exception as e:
-                    print(f"Warning: Error processing {video_file}: {e}")
+                    # print(f"Warning: Error processing {video_file}: {e}")
                     continue
 
         if len(all_sequences) == 0:
@@ -108,6 +111,10 @@ class X4K1000FPSDataset(BaseVideoDataset):
             self.video_list = all_sequences[train_end:val_end]
         else:  # test
             self.video_list = all_sequences[val_end:]
+            
+        # Apply max_sequences limit
+        if self.max_sequences is not None:
+            self.video_list = self.video_list[:self.max_sequences]
 
     def __getitem__(self, idx):
         """
@@ -211,7 +218,8 @@ if __name__ == '__main__':
             num_frames=64,
             crop_size=(224, 224),
             augment=True,
-            cache_frames=False
+            cache_frames=False,
+            max_sequences=50 # Test limit
         )
 
         print(f"Dataset loaded successfully!")

@@ -20,6 +20,13 @@ from pathlib import Path
 from typing import List, Tuple
 from .base_video import BaseVideoDataset, VideoFrameExtractor
 
+import sys
+# Ensure parent directory is in path to find configs
+sys.path.append(str(Path(__file__).parent.parent))
+
+from configs.default import Config
+
+config = Config()
 
 class UCF101Dataset(BaseVideoDataset):
     """
@@ -39,7 +46,8 @@ class UCF101Dataset(BaseVideoDataset):
                  val_split: float = 0.15,
                  use_official_splits: bool = False,
                  split_file: str | None = None,
-                 input_scale: float = 1.0):
+                 input_scale: float = 1.0,
+                 max_sequences: int | None = None): # Add max_sequences
         """
         Args:
             data_root: Root directory (/data/UCF-101)
@@ -52,11 +60,13 @@ class UCF101Dataset(BaseVideoDataset):
             val_split: Fraction for validation if not using official splits
             use_official_splits: Use official UCF-101 train/test splits
             split_file: Path to official split file (trainlist01.txt, etc.)
+            max_sequences: Maximum number of sequences to load (for debugging or limiting dataset size)
         """
         self.use_official_splits = use_official_splits
         self.split_file = split_file
         self.train_split = train_split
         self.val_split = val_split
+        self.max_sequences = max_sequences # Store max_sequences
 
         super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames, input_scale)
 
@@ -66,31 +76,20 @@ class UCF101Dataset(BaseVideoDataset):
         print(f"UCF-101 {mode}: {len(self.video_list)} video sequences")
 
     def _load_official_split(self) -> List[str]:
-        """
-        Load official UCF-101 train/test split.
-
-        Split files should be in format:
-        trainlist01.txt or testlist01.txt
-        """
+        """Load official UCF-101 train/test split."""
         if self.split_file is None or not os.path.exists(self.split_file):
             raise ValueError(f"Split file not found: {self.split_file}")
 
         video_names = []
         with open(self.split_file, 'r') as f:
             for line in f:
-                # Split files have format: "ApplyEyeMakeup/v_ApplyEyeMakeup_g01_c01.avi 0"
-                # or just "ApplyEyeMakeup/v_ApplyEyeMakeup_g01_c01.avi"
                 video_path = line.strip().split()[0]
                 video_names.append(video_path)
 
         return video_names
 
     def _load_video_list(self):
-        """
-        Load list of videos and their valid starting frames.
-
-        Creates a list of (video_path, start_frame) tuples.
-        """
+        """Load list of videos and their valid starting frames."""
         if not self.data_root.exists():
             raise ValueError(f"Dataset not found at {self.data_root}")
 
@@ -107,7 +106,6 @@ class UCF101Dataset(BaseVideoDataset):
             official_set = None
 
         for action_dir in action_dirs:
-            # Find all .avi files in this action category
             video_files = sorted(action_dir.glob('*.avi'))
 
             for video_file in video_files:
@@ -129,22 +127,23 @@ class UCF101Dataset(BaseVideoDataset):
                         all_sequences.append((str(video_file), start_frame))
 
                 except Exception as e:
-                    print(f"Warning: Error processing {video_file}: {e}")
+                    # print(f"Warning: Error processing {video_file}: {e}")
                     continue
 
         if len(all_sequences) == 0:
             raise ValueError(f"No valid video sequences found in {self.data_root}")
 
-        # If using official splits, we're done
+        # Shuffle with fixed seed for reproducibility BEFORE splitting or limiting
+        random.Random(config.seed).shuffle(all_sequences)
+
+        # If using official splits, we're done (unless limiting)
         if self.use_official_splits:
             self.video_list = all_sequences
+            if self.max_sequences is not None:
+                 self.video_list = self.video_list[:self.max_sequences]
             return
 
         # Otherwise, create custom train/val/test split
-        # Shuffle with fixed seed for reproducibility
-        random.Random(42).shuffle(all_sequences)
-
-        # Split into train/val/test
         total = len(all_sequences)
         train_end = int(total * self.train_split)
         val_end = train_end + int(total * self.val_split)
@@ -155,47 +154,50 @@ class UCF101Dataset(BaseVideoDataset):
             self.video_list = all_sequences[train_end:val_end]
         else:  # test
             self.video_list = all_sequences[val_end:]
+        
+        # Apply max_sequences limit AFTER splitting
+        if self.max_sequences is not None:
+            self.video_list = self.video_list[:self.max_sequences]
 
     def __getitem__(self, idx):
         """
-        Get a training sample.
-
-        Returns:
-            Dictionary with:
-                - 'frames': Tensor [64, 3, H, W]
-                - 'ref_frames': Tensor [2, 3, H, W]
-                - 'gt': Tensor [3, H, W]
-                - 'timestep': float
+        Get a training sample with robust error handling.
+        If a video fails to load, pick another random one.
         """
-        video_path, start_frame = self.video_list[idx]
+        attempts = 0
+        max_attempts = 5
+        
+        while attempts < max_attempts:
+            try:
+                video_path, start_frame = self.video_list[idx]
 
-        # Extract frames from video
-        frames = self._get_frames_from_video(video_path, start_frame)
+                # Extract frames from video
+                frames = self._get_frames_from_video(video_path, start_frame)
 
-        # Apply augmentation if training
-        if self.augment:
-            frames = self._apply_augmentation(frames)
-        else:
-            # Just resize to crop_size for validation/test
-            import cv2
-            frames = [cv2.resize(f, self.crop_size) for f in frames]
+                # Apply augmentation if training
+                if self.augment:
+                    frames = self._apply_augmentation(frames)
+                else:
+                    # Just resize to crop_size for validation/test
+                    import cv2
+                    frames = [cv2.resize(f, self.crop_size) for f in frames]
 
-        # Convert to tensors
-        return self._frames_to_tensors(frames)
+                # Convert to tensors
+                return self._frames_to_tensors(frames)
+
+            except Exception as e:
+                # print(f"Error loading video index {idx} ({video_path}): {e}. Retrying with new sample...")
+                # Pick a new random index if the current one is corrupt
+                idx = random.randint(0, len(self.video_list) - 1)
+                attempts += 1
+        
+        raise RuntimeError(f"Failed to load any video after {max_attempts} attempts")
 
 
 def create_ucf101_with_official_splits(data_root: str = '/data/UCF-101',
-                                       splits_root: str = '/data/UCF-101/ucfTrainTestlist'):
-    """
-    Helper function to create UCF-101 datasets with official train/test splits.
-
-    Args:
-        data_root: Root directory of UCF-101 videos
-        splits_root: Directory containing trainlist*.txt and testlist*.txt
-
-    Returns:
-        Tuple of (train_dataset, test_dataset)
-    """
+                                       splits_root: str = '/data/UCF-101/ucfTrainTestlist',
+                                       max_sequences: int | None = None): # Add max_sequences
+    """Helper function to create UCF-101 datasets with official train/test splits."""
     train_split_file = os.path.join(splits_root, 'trainlist01.txt')
     test_split_file = os.path.join(splits_root, 'testlist01.txt')
 
@@ -203,7 +205,8 @@ def create_ucf101_with_official_splits(data_root: str = '/data/UCF-101',
         data_root=data_root,
         mode='train',
         use_official_splits=True,
-        split_file=train_split_file
+        split_file=train_split_file,
+        max_sequences=max_sequences # Pass max_sequences
     )
 
     test_dataset = UCF101Dataset(
@@ -211,7 +214,8 @@ def create_ucf101_with_official_splits(data_root: str = '/data/UCF-101',
         mode='test',
         use_official_splits=True,
         split_file=test_split_file,
-        augment=False
+        augment=False,
+        max_sequences=max_sequences # Pass max_sequences (optional, maybe smaller for val)
     )
 
     return train_dataset, test_dataset
@@ -231,8 +235,8 @@ if __name__ == '__main__':
         print("Please ensure UCF-101 is downloaded and extracted to /data/")
         sys.exit(1)
 
-    # Test with custom splits
-    print("\n1. Testing with custom splits...")
+    # Test with custom splits AND LIMIT
+    print("\n1. Testing with custom splits (limited to 100)...")
     try:
         dataset = UCF101Dataset(
             data_root=data_root,
@@ -241,7 +245,8 @@ if __name__ == '__main__':
             crop_size=(224, 224),
             augment=True,
             cache_frames=False,
-            use_official_splits=False
+            use_official_splits=False,
+            max_sequences=100 # Limit to 100
         )
 
         print(f"Dataset loaded successfully!")

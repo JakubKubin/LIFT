@@ -7,8 +7,9 @@ class Config:
 
     # Data parameters
     data_root = 'data/vimeo90k'
-    num_frames = 7
+    num_frames = 3
     crop_size = (224, 224)
+    # crop_size = (224, 224)
     target_resolution = (256, 448)  # Target resolution for experiments
     input_scale = 1.0
 
@@ -45,8 +46,8 @@ class Config:
     refine_reduce_channels = 32  # Reduce from 128 to this
 
     # Training parameters
-    batch_size = 4
-    num_epochs = 300
+    batch_size = 50
+    num_epochs = 20
     learning_rate = 3e-4
     weight_decay = 1e-3
     lr_warmup_steps = 2000
@@ -63,7 +64,7 @@ class Config:
     mixed_precision = True  # Use automatic mixed precision
 
     # DataLoader parameters
-    num_workers = 4
+    num_workers = 16
     pin_memory = True
     prefetch_factor = 2
 

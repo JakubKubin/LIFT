@@ -150,3 +150,4 @@ marimo/_lsp/
 __marimo__/
 
 data
+checkpoints

@@ -224,6 +224,25 @@ class TemporalAggregator(nn.Module):
         self.window_size = config.adjusted_window_size
         self.patch_size = config.spatial_patch_size
 
+        # Determine patch projection
+        # Note: Input features are at s16 scale.
+        # encoder_channels['s16'] = 256
+        # patch_size = 2
+        # patch_dim = 256 * 2 * 2 = 1024
+        
+        # Calculate expected input dimension from config
+        c_in = config.encoder_channels['s16']
+        patch_dim = c_in * self.patch_size * self.patch_size
+        
+        # Debug print to confirm what is happening
+        print(f"TemporalAggregator: patch_dim={patch_dim}, dim={self.dim}")
+        
+        # Define projection layer in __init__ to ensure it's registered
+        if patch_dim != self.dim:
+            self.patch_proj = nn.Linear(patch_dim, self.dim)
+        else:
+            self.patch_proj = nn.Identity()
+
         # Transformer layers
         self.layers = nn.ModuleList([
             TransformerBlock(
@@ -270,10 +289,8 @@ class TemporalAggregator(nn.Module):
         # Reshape to [B, T, num_patches, patch_dim]
         tokens = patches.transpose(1, 2).reshape(B, T, num_patches, patch_dim)
 
-        # Project to model dimension if needed
-        if patch_dim != self.dim:
-            self.patch_proj = nn.Linear(patch_dim, self.dim).to(x.device)
-            tokens = self.patch_proj(tokens)
+        # Project to model dimension using the layer defined in __init__
+        tokens = self.patch_proj(tokens)
 
         return tokens, H // patch_size, W // patch_size
 
