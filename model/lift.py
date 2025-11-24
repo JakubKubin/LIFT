@@ -23,7 +23,7 @@ class LIFT(nn.Module):
     Complete LIFT model for video frame interpolation.
 
     Interpolates frame at t=0.5 between reference frames 31 and 32
-    using context from all 64 frames in the sequence.
+    using context from all 15 frames in the sequence.
     """
 
     def __init__(self, config):
@@ -79,7 +79,7 @@ class LIFT(nn.Module):
         Forward pass through all stages.
 
         Args:
-            frames: Input frames [B, 64, 3, H, W]
+            frames: Input frames [B, 15, 3, H, W]
             ref_frames: Reference frames [B, 2, 3, H, W] (optional, extracted from frames if None)
             timestep: Interpolation timestep (default 0.5)
             return_intermediate: Whether to return intermediate outputs for visualization
@@ -90,7 +90,7 @@ class LIFT(nn.Module):
                 - 'coarse': Coarse frame before refinement [B, 3, H/4, W/4]
                 - 'flows': Flow predictions
                 - 'occlusions': Occlusion maps
-                - 'attention_weights': Temporal attention weights [B, 64]
+                - 'attention_weights': Temporal attention weights [B, 15]
 
             If return_intermediate=True, also includes:
                 - All intermediate outputs from each stage
@@ -101,16 +101,16 @@ class LIFT(nn.Module):
         if ref_frames is None:
             ref_frames = frames[:, self.encoder.ref_indices]  # [B, 2, 3, H, W]
 
-        # Stage 1: Extract multi-scale features from all 64 frames
+        # Stage 1: Extract multi-scale features from all 15 frames
         encoder_output = self.encoder(frames)
-        feats_s16 = encoder_output['feats_s16']      # [B, 64, 256, H/16, W/16]
+        feats_s16 = encoder_output['feats_s16']      # [B, 15, 256, H/16, W/16]
         ref_feats_s4 = encoder_output['ref_feats_s4'] # [B, 2, 128, H/4, W/4]
         ref_feats_s8 = encoder_output['ref_feats_s8'] # [B, 2, 192, H/8, W/8]
 
-        # Stage 2: Aggregate temporal context from 64 frames
+        # Stage 2: Aggregate temporal context from 15 frames
         transformer_output = self.transformer(feats_s16)
         context = transformer_output['context']              # [B, 256, H/16, W/16]
-        attention_weights = transformer_output['attention_weights']  # [B, 64]
+        attention_weights = transformer_output['attention_weights']  # [B, 15]
 
         # Stage 3: Estimate optical flows and occlusion maps
         flow_output = self.flow_estimator(
@@ -161,7 +161,7 @@ class LIFT(nn.Module):
         Inference mode - simplified interface.
 
         Args:
-            frames: Input frames [B, 64, 3, H, W]
+            frames: Input frames [B, 15, 3, H, W]
             timestep: Interpolation timestep (default 0.5)
 
         Returns:
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     B, H, W = 2, 256, 256
 
     # config.model_frames calculates the correct input size automatically
-    # (e.g., returns 6 if num_frames=7, or 64 if num_frames=64)
+    # (e.g., returns 6 if num_frames=7, or 15 if num_frames=15)
     num_test_frames = config.model_frames
 
     print(f"\nGenerating random input with {num_test_frames} frames (based on config.num_frames={config.num_frames})...")

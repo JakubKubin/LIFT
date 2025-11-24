@@ -58,7 +58,7 @@ from torch.utils.data import DataLoader
 train_dataset = X4K1000FPSDataset(
     data_root='/data/X4K1000FPS',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=True
 )
@@ -74,7 +74,7 @@ train_loader = DataLoader(
 
 # Train
 for batch in train_loader:
-    frames = batch['frames']        # [B, 64, 3, H, W]
+    frames = batch['frames']        # [B, 15, 3, H, W]
     ref_frames = batch['ref_frames'] # [B, 2, 3, H, W]
     gt = batch['gt']                # [B, 3, H, W]
     # ... training code
@@ -90,7 +90,7 @@ from torch.utils.data import DataLoader
 train_dataset = UCF101Dataset(
     data_root='/data/UCF-101',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=True,
     train_split=0.7,
@@ -123,7 +123,7 @@ train_loader = DataLoader(
 X4K1000FPSDataset(
     data_root='/data/X4K1000FPS',  # Root directory
     mode='train',                   # 'train', 'val', or 'test'
-    num_frames=64,                  # Number of frames to extract
+    num_frames=15,                  # Number of frames to extract
     crop_size=(224, 224),          # Random crop size (H, W)
     augment=True,                  # Data augmentation
     cache_frames=False,            # Cache frames in memory (use carefully!)
@@ -138,7 +138,7 @@ X4K1000FPSDataset(
 UCF101Dataset(
     data_root='/data/UCF-101',     # Root directory
     mode='train',                   # 'train', 'val', or 'test'
-    num_frames=64,                  # Number of frames to extract
+    num_frames=15,                  # Number of frames to extract
     crop_size=(224, 224),          # Random crop size (H, W)
     augment=True,                  # Data augmentation
     cache_frames=False,            # Cache frames in memory
@@ -159,15 +159,15 @@ Both datasets support the following augmentations (when `augment=True`):
 4. **Random Rotation**: 90°, 180°, 270° (25% each, 25% no rotation)
 5. **Random Temporal Flip**: Reverse frame sequence (50% probability)
 
-**Important**: All augmentations are applied consistently across all 64 frames in a sequence.
+**Important**: All augmentations are applied consistently across all 15 frames in a sequence.
 
 ## Memory Management
 
 ### Frame Caching
 
 By default, `cache_frames=False` to avoid memory issues. Each frame sequence takes:
-- 64 frames × 256×256×3 × 1 byte = 12.5 MB per sequence
-- With 10,000 sequences = 125 GB of RAM!
+- 15 frames × 256×256×3 × 1 byte = 1 MB per sequence
+- With 10,000 sequences = 1 GB of RAM!
 
 Only enable caching if:
 - You have abundant RAM (128+ GB)
@@ -179,7 +179,7 @@ Only enable caching if:
 The datasets use lazy loading:
 ```python
 # Frames are loaded on-demand from video
-# Only the requested 64 frames are extracted
+# Only the requested 15 frames are extracted
 # No entire video loaded into memory
 ```
 
@@ -194,7 +194,7 @@ from torch.utils.data import DataLoader
 train_dataset = X4K1000FPSDataset(
     data_root='/data/X4K1000FPS',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=True
 )
@@ -202,7 +202,7 @@ train_dataset = X4K1000FPSDataset(
 val_dataset = X4K1000FPSDataset(
     data_root='/data/X4K1000FPS',
     mode='val',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=False
 )
@@ -299,7 +299,7 @@ Total sequences: 12345
 
 Testing sample loading...
 Sample shapes:
-  frames: torch.Size([64, 3, 224, 224])
+  frames: torch.Size([15, 3, 224, 224])
   ref_frames: torch.Size([2, 3, 224, 224])
   gt: torch.Size([3, 224, 224])
   timestep: 0.5
@@ -424,7 +424,7 @@ train_dataset = UCF101Dataset(
 **UCF-101**: Good for diverse motion patterns (action videos)
 
 Both datasets:
-- Support 64-frame sequences for LIFT
+- Support 15-frame sequences for LIFT
 - Automatic train/val/test splits
 - Memory-efficient lazy loading
 - Comprehensive data augmentation

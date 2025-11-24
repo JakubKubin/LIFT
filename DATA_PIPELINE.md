@@ -2,14 +2,14 @@
 
 ## Overview
 
-The data pipeline is designed with memory efficiency as the top priority, enabling training with 64-frame sequences on consumer GPUs (16GB VRAM).
+The data pipeline is designed with memory efficiency as the top priority, enabling training with 15-frame sequences on consumer GPUs (16GB VRAM).
 
 ## Key Design Decisions
 
 ###  1. Lazy Loading Strategy
 
-**Problem**: Loading 64 full-resolution frames (256x448) per sample would require:
-- Raw data: 64 * 3 * 448 * 256 * 4 bytes = 88 MB per sample
+**Problem**: Loading 15 full-resolution frames (256x448) per sample would require:
+- Raw data: 15 * 3 * 448 * 256 * 4 bytes = 88 MB per sample
 - With batch_size=4: 352 MB just for input data
 - Add gradients, activations, optimizer states: 2-3 GB per batch
 
@@ -29,30 +29,30 @@ for path in frame_paths:
 ### 2. Multi-Scale Feature Storage
 
 **Problem**: Storing features at all scales for all frames is prohibitive:
-- s4 (128 channels): 64 * 128 * 64 * 64 * 4 = 134 MB
-- s8 (192 channels): 64 * 192 * 32 * 32 * 4 = 50 MB
-- s16 (256 channels): 64 * 256 * 16 * 16 * 4 = 67 MB
+- s4 (128 channels): 15 * 128 * 15 * 15 * 4 = 134 MB
+- s8 (192 channels): 15 * 192 * 32 * 32 * 4 = 50 MB
+- s16 (256 channels): 15 * 256 * 16 * 16 * 4 = 67 MB
 - Total: 251 MB per sample before batch
 
 **Solution**: Selective feature retention
-- Keep s16 for all 64 frames (needed for transformer)
+- Keep s16 for all 15 frames (needed for transformer)
 - Keep s4 and s8 ONLY for reference frames 31 and 32
 - Reduces storage from 251 MB to 73 MB (71% reduction)
 
 ### 3. Windowed Attention
 
 **Problem**: Full temporal attention has O(T^2) complexity
-- For T=64: 64 * 64 = 4096 attention computations per spatial location
-- For 16x16 spatial grid: 4096 * 256 = 1M computations
+- For T=15: 15 * 15 = 225 attention computations per spatial location
+- For 16x16 spatial grid: 225 * 256 = 57600 computations
 
 **Solution**: Windowed attention with window_size=8
 - Complexity: O(T * W) where W=8
-- 64 * 8 = 512 computations per spatial location
+- 15 * 8 = 512 computations per spatial location
 - 8x reduction in memory and computation
 
 ### 4. Efficient Data Augmentation
 
-**Problem**: Augmenting 64 frames independently creates inconsistencies
+**Problem**: Augmenting 15 frames independently creates inconsistencies
 
 **Solution**: Apply augmentation parameters once, use for all frames
 ```python
@@ -72,9 +72,9 @@ for frame in frames:
 
 ## Dataset Classes
 
-### Vimeo64Dataset
+### Vimeo15Dataset
 
-Purpose: Load 64 consecutive frames from directory structure
+Purpose: Load 15 consecutive frames from directory structure
 
 **Directory structure expected**:
 ```
@@ -99,8 +99,8 @@ data_root/
 - Support for temporal reversal augmentation
 
 **Memory profile per batch (batch_size=4)**:
-- Loading: 4 * 64 * 3 * 256 * 256 * 1 byte = 50 MB (uint8)
-- Tensors: 4 * 64 * 3 * 256 * 256 * 4 bytes = 200 MB (float32)
+- Loading: 4 * 15 * 3 * 256 * 256 * 1 byte = 50 MB (uint8)
+- Tensors: 4 * 15 * 3 * 256 * 256 * 4 bytes = 200 MB (float32)
 - Peak during augmentation: ~250 MB
 
 ### VideoSequenceDataset
@@ -120,7 +120,7 @@ Purpose: Load frames directly from video files
 ```
 
 **Memory profile**:
-- Only 64 frames in memory at once
+- Only 15 frames in memory at once
 - Video decoder handles buffering
 - Typically 20-30% less memory than image sequences
 
@@ -255,7 +255,7 @@ for obj in gc.get_objects():
 ## Performance Benchmarks
 
 On an RTX 4080 (16GB):
-- Loading 64 frames: ~50ms
+- Loading 15 frames: ~20ms
 - Augmentation: ~30ms
 - Tensor conversion: ~20ms
 - Total per sample: ~100ms

@@ -16,20 +16,20 @@ import os
 import random
 from pathlib import Path
 from typing import List, Tuple
-from .base_video import BaseVideoDataset, VideoFrameExtractor
+from .base_video import BaseVideoDataset
 
 
 class X4K1000FPSDataset(BaseVideoDataset):
     """
     X4K1000FPS video dataset for frame interpolation.
 
-    Extracts 64 consecutive frames from high-frame-rate videos.
+    Extracts 15 consecutive frames from high-frame-rate videos.
     """
 
     def __init__(self,
                  data_root: str = '/data/X4K1000FPS',
                  mode: str = 'train',
-                 num_frames: int = 64,
+                 num_frames: int = 15,
                  crop_size: Tuple[int, int] = (224, 224),
                  augment: bool = True,
                  cache_frames: bool = False,
@@ -41,7 +41,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
         Args:
             data_root: Root directory (/data/X4K1000FPS)
             mode: 'train', 'val', or 'test'
-            num_frames: Number of frames to extract (64 for LIFT)
+            num_frames: Number of frames to extract (15 for LIFT)
             crop_size: Size for random crop (H, W)
             augment: Apply augmentation
             cache_frames: Cache extracted frames (memory intensive)
@@ -111,7 +111,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
             self.video_list = all_sequences[train_end:val_end]
         else:  # test
             self.video_list = all_sequences[val_end:]
-            
+
         # Apply max_sequences limit
         if self.max_sequences is not None:
             self.video_list = self.video_list[:self.max_sequences]
@@ -122,7 +122,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
 
         Returns:
             Dictionary with:
-                - 'frames': Tensor [64, 3, H, W]
+                - 'frames': Tensor [15, 3, H, W]
                 - 'ref_frames': Tensor [2, 3, H, W]
                 - 'gt': Tensor [3, H, W]
                 - 'timestep': float
@@ -215,7 +215,7 @@ if __name__ == '__main__':
         dataset = X4K1000FPSDataset(
             data_root=data_root,
             mode='train',
-            num_frames=64,
+            num_frames=15,
             crop_size=(224, 224),
             augment=True,
             cache_frames=False,

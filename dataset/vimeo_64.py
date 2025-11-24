@@ -9,9 +9,9 @@ from pathlib import Path
 cv2.setNumThreads(1)
 
 
-class Vimeo64Dataset(Dataset):
+class Vimeo15Dataset(Dataset):
     """
-    Dataset for LIFT model that loads 64 consecutive frames for long-range temporal context.
+    Dataset for LIFT model that loads 15 consecutive frames for long-range temporal context.
 
     Memory optimization strategy:
     1. Lazy loading: frames are loaded on-demand, not stored in memory
@@ -24,7 +24,7 @@ class Vimeo64Dataset(Dataset):
     def __init__(self,
                  data_root,
                  mode='train',
-                 num_frames=64,
+                 num_frames=15,
                  crop_size=(224, 224),
                  augment=True,
                  input_scale=1.0,
@@ -33,7 +33,7 @@ class Vimeo64Dataset(Dataset):
         Args:
             data_root: Root directory containing video sequences
             mode: 'train', 'val', or 'test'
-            num_frames: Number of frames to load (default 64)
+            num_frames: Number of frames to load (default 15)
             crop_size: Tuple of (height, width) for random crop
             augment: Whether to apply data augmentation
             max_sequences: Maximum number of sequences to load (for debugging or limiting dataset size)
@@ -98,7 +98,7 @@ class Vimeo64Dataset(Dataset):
         if self.max_sequences is not None:
             # Shuffle to ensure we get a random subset
             # Using a fixed seed for reproducibility if needed, but random.shuffle is fine here
-            random.shuffle(sequences) 
+            random.shuffle(sequences)
             sequences = sequences[:self.max_sequences]
 
         return sequences
@@ -192,8 +192,8 @@ class Vimeo64Dataset(Dataset):
 
         Returns:
             dict with keys:
-                - 'frames': Tensor [64, 3, H, W] - all 64 frames normalized to [0, 1]
-                - 'ref_frames': Tensor [2, 3, H, W] - reference frames (31, 32)
+                - 'frames': Tensor [15, 3, H, W] - all 15 frames normalized to [0, 1]
+                - 'ref_frames': Tensor [2, 3, H, W] - reference frames (7, 8)
                 - 'gt': Tensor [3, H, W] - ground truth middle frame
                 - 'timestep': float - interpolation timestep (0.5)
 
@@ -231,7 +231,7 @@ class Vimeo64Dataset(Dataset):
         frames_tensor = torch.stack([
             torch.from_numpy(f.transpose(2, 0, 1).copy()).float() / 255.0
             for f in frames
-        ])  # [64, 3, H, W]
+        ])  # [15, 3, H, W]
 
         ref_frames_tensor = torch.stack([
             torch.from_numpy(ref_frame_1.transpose(2, 0, 1).copy()).float() / 255.0,
@@ -263,7 +263,7 @@ class VideoSequenceDataset(Dataset):
     def __init__(self,
                  video_list_file,
                  mode='train',
-                 num_frames=64,
+                 num_frames=15,
                  crop_size=(224, 224),
                  augment=True,
                  input_scale=1.0,
@@ -293,7 +293,7 @@ class VideoSequenceDataset(Dataset):
             self.video_paths = self.video_paths[:int(len(self.video_paths) * 0.95)]
         elif mode == 'val':
             self.video_paths = self.video_paths[int(len(self.video_paths) * 0.95):]
-            
+
         # Apply max_sequences limit
         if self.max_sequences is not None:
             random.shuffle(self.video_paths)
@@ -357,7 +357,7 @@ class VideoSequenceDataset(Dataset):
 
         # Apply augmentation
         if self.augment:
-            frames, ref_frame_1, ref_frame_2, gt_frame = Vimeo64Dataset._apply_augmentation(
+            frames, ref_frame_1, ref_frame_2, gt_frame = Vimeo15Dataset._apply_augmentation(
                 frames, ref_frame_1, ref_frame_2, gt_frame, self.crop_size
             )
 
@@ -381,17 +381,3 @@ class VideoSequenceDataset(Dataset):
             'gt': gt_tensor,
             'timestep': timestep
         }
-
-
-def collate_fn(batch):
-    """
-    Custom collate function for DataLoader.
-
-    Efficiently stacks batches without unnecessary copies.
-    """
-    return {
-        'frames': torch.stack([item['frames'] for item in batch]),
-        'ref_frames': torch.stack([item['ref_frames'] for item in batch]),
-        'gt': torch.stack([item['gt'] for item in batch]),
-        'timestep': torch.stack([item['timestep'] for item in batch])
-    }

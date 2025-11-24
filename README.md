@@ -1,14 +1,14 @@
 # LIFT: Long-range Interpolation with Far Temporal context
 
-Implementation of LIFT video frame interpolation model with 64-frame temporal context.
+Implementation of LIFT video frame interpolation model with 15-frame temporal context.
 
 ## Project Structure
 
 ```
 LIFT/
-├── model/               # Model components
-│   ├── encoder.py      # Stage 1: Feature extraction from 64 frames
-│   ├── transformer.py  # Stage 2: Temporal aggregation with windowed attention
+├── model/             # Model components
+│   ├── encoder.py     # Stage 1: Feature extraction from 15 frames
+│   ├── transformer.py # Stage 2: Temporal aggregation with windowed attention
 │   ├── ifnet.py       # Stage 3: Multi-scale flow estimation
 │   ├── synthesis.py   # Stage 4: Coarse frame synthesis
 │   ├── refine.py      # Stage 5: Full-resolution refinement
@@ -16,15 +16,15 @@ LIFT/
 │   ├── loss.py        # Loss functions
 │   └── lift.py        # Main LIFT model
 │
-├── dataset/            # Data pipeline
-│   ├── vimeo_64.py    # 64-frame sequence dataset
+├── dataset/           # Data pipeline
+│   ├── vimeo_15.py    # 15-frame sequence dataset
 │   └── __init__.py
 │
-├── utils/              # Utilities
+├── utils/             # Utilities
 │   ├── flow_viz.py    # Flow visualization
 │   └── __init__.py
 │
-├── configs/            # Configuration files
+├── configs/           # Configuration files
 │   └── default.py     # Default hyperparameters
 │
 ├── train.py           # Training script
@@ -36,7 +36,7 @@ LIFT/
 
 ### Memory Optimization Strategy
 
-The key challenge is handling 64 frames efficiently. Our approach:
+The key challenge is handling 15 frames efficiently. Our approach:
 
 1. **Lazy Loading**: Frames are loaded on-demand, not stored in memory
 2. **Sequential Reading**: Read frames one by one to avoid memory spikes
@@ -45,8 +45,8 @@ The key challenge is handling 64 frames efficiently. Our approach:
 
 ### Dataset Classes
 
-#### Vimeo64Dataset
-- Loads 64 consecutive frames from image sequences
+#### Vimeo15Dataset
+- Loads 15 consecutive frames from image sequences
 - Supports directory structures:
   - Vimeo-style: `sequences/category/sequence_id/im*.png`
   - Flat: `sequence_id/im*.png`
@@ -63,8 +63,8 @@ The key challenge is handling 64 frames efficiently. Our approach:
 Each dataset item returns a dictionary:
 ```python
 {
-    'frames': Tensor[64, 3, H, W],      # All 64 frames
-    'ref_frames': Tensor[2, 3, H, W],   # Reference frames (31, 32)
+    'frames': Tensor[15, 3, H, W],      # All 15 frames
+    'ref_frames': Tensor[2, 3, H, W],   # Reference frames (7, 9)
     'gt': Tensor[3, H, W],              # Ground truth interpolation
     'timestep': float                    # Interpolation time (0.5)
 }
@@ -73,8 +73,8 @@ Each dataset item returns a dictionary:
 ### Memory Usage Estimates
 
 For batch_size=4, resolution=256x256, fp32:
-- Input frames (64 frames): 4 * 64 * 3 * 256 * 256 * 4 = 201 MB
-- Features at s16: 4 * 64 * 256 * 16 * 16 * 4 = 67 MB
+- Input frames (15 frames): 4 * 15 * 3 * 256 * 256 * 4 = 201 MB
+- Features at s16: 4 * 15 * 256 * 16 * 16 * 4 = 67 MB
 - Features at s8: 4 * 2 * 192 * 32 * 32 * 4 = 6 MB
 - Features at s4: 4 * 2 * 128 * 64 * 64 * 4 = 16 MB
 
@@ -97,7 +97,7 @@ train_loader = DataLoader(
 ## Model Architecture (LIFT)
 
 ### Stage 1: Feature Extraction
-- Shared encoder for all 64 frames
+- Shared encoder for all 15 frames
 - Multi-scale features: s4, s8, s16
 - Sinusoidal positional encoding
 - Memory optimization: only keep s16 for all frames, s4/s8 only for ref frames
@@ -110,9 +110,9 @@ train_loader = DataLoader(
 
 ### Stage 3: Flow Estimation
 - Two-scale cascade: s8 -> s4
-- Bi-directional flows: I_31 -> I_t and I_32 -> I_t
+- Bi-directional flows: I_7 -> I_t and I_9 -> I_t
 - Occlusion maps predicted in logit space
-- Context injection from 64-frame aggregation
+- Context injection from 15-frame aggregation
 
 ### Stage 4: Coarse Synthesis
 - Backward warping with occlusion-aware blending
@@ -158,5 +158,5 @@ python inference.py --input video.mp4 --output output/ --checkpoint weights.pth
 ## Notes
 
 - This implementation focuses on memory efficiency for research purposes
-- 64-frame context provides significant quality improvements over 2-frame methods
+- 15-frame context provides significant quality improvements over 2-frame methods
 - Suitable for both academic research and practical applications

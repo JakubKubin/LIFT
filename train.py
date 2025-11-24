@@ -15,7 +15,7 @@ import time
 
 # Import all available datasets
 from dataset import (
-    Vimeo64Dataset,
+    Vimeo15Dataset,
     X4K1000FPSDataset,
     UCF101Dataset,
     collate_fn
@@ -205,7 +205,7 @@ def validate(model, dataloader, loss_fn, device, epoch, config, writer):
 def get_dataset_class(dataset_name):
     """Factory function to get the correct dataset class."""
     if dataset_name.lower() == 'vimeo':
-        return Vimeo64Dataset
+        return Vimeo15Dataset
     elif dataset_name.lower() == 'x4k':
         return X4K1000FPSDataset
     elif dataset_name.lower() == 'ucf101':
@@ -234,7 +234,7 @@ def main():
     parser.add_argument('--num_workers', type=int, default=None,
                         help='Number of dataloader workers (overrides config)')
     parser.add_argument('--num_frames', type=int, default=None,
-                        help='Override number of frames (default from config is 7, but LIFT needs 64)')
+                        help='Override number of frames (default from config is 7, but LIFT needs 15)')
     parser.add_argument('--max_sequences', type=int, default=None,
                     help='Limit total number of sequences per dataset (train/val)')
     args = parser.parse_args()
@@ -247,20 +247,14 @@ def main():
     if args.num_epochs is not None:
         config.num_epochs = args.num_epochs
 
-    # --- HARDWARE OPTIMIZATION 3: Num Workers ---
-    # Default config might use 4. Your i7-14700K has 20 cores / 28 threads.
-    # We can safely increase this to feed the GPU faster.
-    # However, 32GB RAM means we shouldn't go too crazy (each worker consumes RAM).
     if args.num_workers is not None:
         config.num_workers = args.num_workers
 
     # Handle num_frames override (Fixing the default.py vs LIFT requirement)
     if args.num_frames is not None:
         config.num_frames = args.num_frames
-    elif config.num_frames == 7:
-        # Config default is 7 (for RIFE compat), but LIFT usually wants 64.
-        # We'll warn the user but stick to config unless they passed --num_frames
-        print(f"WARNING: config.num_frames is {config.num_frames}. If training LIFT, you likely want --num_frames 64.")
+    elif config.num_frames != 7:
+        print(f"WARNING: config.num_frames is {config.num_frames}. If training LIFT, you likely want --num_frames 15.")
 
     # Create directories
     os.makedirs(config.log_dir, exist_ok=True)
@@ -306,15 +300,15 @@ def main():
         raise ValueError(f"No training samples found in {config.data_root}. Check directory structure.")
 
     # --- HARDWARE OPTIMIZATION 4: DataLoader Settings ---
-    # persistent_workers=True: Keeps worker processes alive between epochs. 
-    # This is crucial for short epochs or when worker startup time is high (typical with 64 frames/large libraries).
+    # persistent_workers=True: Keeps worker processes alive between epochs.
+    # This is crucial for short epochs or when worker startup time is high (typical with 15 frames/large libraries).
     # prefetch_factor=2: Buffers 2 batches per worker to ensure GPU always has data.
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
-        pin_memory=True, # Critical for NVMe -> GPU speed
+        pin_memory=True,
         drop_last=True,
         collate_fn=collate_fn,
         persistent_workers=True,
@@ -391,7 +385,7 @@ def main():
     print(f"Starting training on {config.num_epochs} epochs...")
     print(f"Batch Size: {config.batch_size} | Workers: {config.num_workers} | AMP: Enabled")
     print("="*60)
-    
+
     best_val_loss = float('inf')
 
     for epoch in range(start_epoch, config.num_epochs):

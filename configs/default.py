@@ -7,7 +7,7 @@ class Config:
 
     # Data parameters
     data_root = 'data/vimeo90k'
-    num_frames = 3
+    num_frames = 15
     crop_size = (224, 224)
     # crop_size = (224, 224)
     target_resolution = (256, 448)  # Target resolution for experiments

@@ -15,16 +15,16 @@ pip install -r requirements.txt
 The data pipeline is fully functional and can be tested immediately:
 
 ```python
-from dataset import Vimeo64Dataset
+from dataset import Vimeo15Dataset
 from torch.utils.data import DataLoader
-from dataset.vimeo_64 import collate_fn
+from dataset.vimeo_15 import collate_fn
 
 # Create dataset
 # Note: You need actual data in this directory structure
-dataset = Vimeo64Dataset(
+dataset = Vimeo15Dataset(
     data_root='path/to/your/data',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=True
 )
@@ -40,7 +40,7 @@ loader = DataLoader(
 
 # Test loading
 for batch in loader:
-    frames = batch['frames']        # [4, 64, 3, 224, 224]
+    frames = batch['frames']        # [4, 15, 3, 224, 224]
     ref_frames = batch['ref_frames'] # [4, 2, 3, 224, 224]
     gt = batch['gt']                # [4, 3, 224, 224]
 
@@ -64,7 +64,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 encoder = FrameEncoder(config).to(device)
 
 # Test with random data
-frames = torch.rand(2, 64, 3, 256, 256).to(device)
+frames = torch.rand(2, 15, 3, 256, 256).to(device)
 
 # Forward pass
 with torch.no_grad():
@@ -82,7 +82,7 @@ if torch.cuda.is_available():
 Expected output:
 ```
 Encoder outputs:
-  feats_s16: torch.Size([2, 64, 256, 16, 16])
+  feats_s16: torch.Size([2, 15, 256, 16, 16])
   ref_feats_s4: torch.Size([2, 2, 128, 64, 64])
   ref_feats_s8: torch.Size([2, 2, 192, 32, 32])
 
@@ -103,7 +103,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 transformer = TemporalAggregator(config).to(device)
 
 # Test with random features (output from encoder)
-feats_s16 = torch.rand(2, 64, 256, 16, 16).to(device)
+feats_s16 = torch.rand(2, 15, 256, 16, 16).to(device)
 
 # Forward pass
 with torch.no_grad():
@@ -125,7 +125,7 @@ Expected output:
 ```
 Transformer outputs:
   Context: torch.Size([2, 256, 16, 16])
-  Attention weights: torch.Size([2, 64])
+  Attention weights: torch.Size([2, 15])
 
 Attention analysis:
   Min weight: 0.0089
@@ -231,8 +231,8 @@ for seq_id in range(3):
     seq_dir = f'{data_root}/sequences/test/seq{seq_id:03d}'
     os.makedirs(seq_dir, exist_ok=True)
 
-    # Create 64 frames with simple pattern
-    for frame_id in range(64):
+    # Create 15 frames with simple pattern
+    for frame_id in range(15):
         # Generate synthetic frame
         img = np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8)
 

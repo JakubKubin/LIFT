@@ -1,7 +1,7 @@
 """
 Stage 1: Feature Extraction Encoder
 
-Extracts multi-scale features from each of the 64 input frames.
+Extracts multi-scale features from each of the 15 input frames.
 Uses a shared encoder based on RIFE architecture with positional encoding.
 """
 
@@ -134,12 +134,12 @@ class PositionalEncoding(nn.Module):
     Sinusoidal positional encoding for temporal positions.
 
     Adds temporal information to features so the model knows which frame
-    each feature map comes from in the 64-frame sequence.
+    each feature map comes from in the 15-frame sequence.
     """
 
-    pe: torch.Tensor  # Type hint for registered buffer
+    pe: torch.Tensor
 
-    def __init__(self, num_frames=64, d_model=256):
+    def __init__(self, num_frames=15, d_model=256):
         super().__init__()
 
         # Create positional encoding for all frames
@@ -182,7 +182,7 @@ class PositionalEncoding(nn.Module):
 
 class FrameEncoder(nn.Module):
     """
-    Complete encoding module for all 64 frames.
+    Complete encoding module for all 15 frames.
 
     Processes frames efficiently using shared encoder and adds positional encoding.
 
@@ -220,14 +220,14 @@ class FrameEncoder(nn.Module):
 
     def forward(self, frames):
         """
-        Encode all 64 frames with positional information.
+        Encode all 15 frames with positional information.
 
         Args:
-            frames: Input frames [B, 64, 3, H, W]
+            frames: Input frames [B, 15, 3, H, W]
 
         Returns:
             Dictionary with:
-                - 'feats_s16': Features at s16 for all frames [B, 64, C, H/16, W/16]
+                - 'feats_s16': Features at s16 for all frames [B, 15, C, H/16, W/16]
                 - 'ref_feats_s4': Features at s4 for ref frames [B, 2, C, H/4, W/4]
                 - 'ref_feats_s8': Features at s8 for ref frames [B, 2, C, H/8, W/8]
 
@@ -284,7 +284,7 @@ class FrameEncoder(nn.Module):
                     ref_feats_s8.append(feats['s8'])
 
         # Stack features along temporal dimension
-        feats_s16 = torch.stack(feats_s16_list, dim=1)  # [B, 64, C, H/16, W/16]
+        feats_s16 = torch.stack(feats_s16_list, dim=1)  # [B, 15, C, H/16, W/16]
         ref_feats_s4 = torch.stack(ref_feats_s4, dim=1)  # [B, 2, C, H/4, W/4]
         ref_feats_s8 = torch.stack(ref_feats_s8, dim=1)  # [B, 2, C, H/8, W/8]
 

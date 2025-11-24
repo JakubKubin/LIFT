@@ -51,7 +51,7 @@ class VideoFrameExtractor:
     @staticmethod
     def extract_frames(video_path: str,
                       start_frame: int = 0,
-                      num_frames: int = 64,
+                      num_frames: int = 15,
                       target_size: Optional[Tuple[int, int]] = None) -> List[np.ndarray]:
         """
         Extract consecutive frames from video.
@@ -100,7 +100,7 @@ class VideoFrameExtractor:
         return frames
 
     @staticmethod
-    def get_valid_start_frames(video_path: str, num_frames: int = 64) -> List[int]:
+    def get_valid_start_frames(video_path: str, num_frames: int = 15) -> List[int]:
         """
         Get all valid starting frame indices for extracting sequences.
 
@@ -132,7 +132,7 @@ class BaseVideoDataset(Dataset):
     def __init__(self,
                  data_root: str,
                  mode: str = 'train',
-                 num_frames: int = 64,
+                 num_frames: int = 15,
                  crop_size: Tuple[int, int] = (224, 224),
                  augment: bool = True,
                  cache_frames: bool = False,
@@ -159,7 +159,7 @@ class BaseVideoDataset(Dataset):
         self.mid_idx = num_frames // 2
 
         if self.is_odd:
-            # For 7 frames: mid=3. Refs=2,4. GT=3.
+            # For 15 frames: mid=7. Refs=6,8. GT=7.
             self.ref_source_idx = [self.mid_idx - 1, self.mid_idx + 1]
         else:
             # For 64 frames: mid=32. Refs=31,32. GT=interpolated.
@@ -327,11 +327,15 @@ class BaseVideoDataset(Dataset):
         raise NotImplementedError("Subclasses must implement __getitem__")
 
 
-if __name__ == '__main__':
-    # Test frame extraction
-    print("Testing VideoFrameExtractor...")
+def collate_fn(batch):
+    """
+    Custom collate function for DataLoader.
 
-    # Create a dummy video for testing
-    # In practice, you would test with actual video files
-    print("VideoFrameExtractor utilities are ready!")
-    print("Use X4K1000FPSDataset or UCF101Dataset for actual data loading")
+    Efficiently stacks batches without unnecessary copies.
+    """
+    return {
+        'frames': torch.stack([item['frames'] for item in batch]),
+        'ref_frames': torch.stack([item['ref_frames'] for item in batch]),
+        'gt': torch.stack([item['gt'] for item in batch]),
+        'timestep': torch.stack([item['timestep'] for item in batch])
+    }

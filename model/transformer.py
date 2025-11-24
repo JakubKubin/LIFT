@@ -1,7 +1,7 @@
 """
 Stage 2: Temporal Transformer
 
-Aggregates temporal information from 64 frames using windowed attention.
+Aggregates temporal information from 15 frames using windowed attention.
 Uses spatial patching and temporal windowing for memory efficiency.
 """
 
@@ -43,10 +43,10 @@ class WindowedTemporalAttention(nn.Module):
     """
     Windowed temporal self-attention.
 
-    Divides 64 frames into windows of 8 frames each and applies
+    Divides 15 frames into windows of 8 frames each and applies
     attention within each window independently.
 
-    This reduces complexity from O(T^2) to O(T * W) where T=64, W=8.
+    This reduces complexity from O(T^2) to O(T * W) where T=15, W=8.
     """
 
     def __init__(self, dim, num_heads=8, window_size=8, dropout=0.1):
@@ -74,7 +74,7 @@ class WindowedTemporalAttention(nn.Module):
         Args:
             x: Input tensor [B, T, L, D] where
                B = batch size
-               T = number of frames (64)
+               T = number of frames (15)
                L = number of spatial tokens per frame
                D = embedding dimension
 
@@ -207,7 +207,7 @@ class TransformerBlock(nn.Module):
 
 class TemporalAggregator(nn.Module):
     """
-    Aggregates 64-frame temporal context using transformer.
+    Aggregates 15-frame temporal context using transformer.
 
     Process:
     1. Convert spatial features to tokens (spatial patching)
@@ -229,14 +229,14 @@ class TemporalAggregator(nn.Module):
         # encoder_channels['s16'] = 256
         # patch_size = 2
         # patch_dim = 256 * 2 * 2 = 1024
-        
+
         # Calculate expected input dimension from config
         c_in = config.encoder_channels['s16']
         patch_dim = c_in * self.patch_size * self.patch_size
-        
+
         # Debug print to confirm what is happening
         print(f"TemporalAggregator: patch_dim={patch_dim}, dim={self.dim}")
-        
+
         # Define projection layer in __init__ to ensure it's registered
         if patch_dim != self.dim:
             self.patch_proj = nn.Linear(patch_dim, self.dim)
@@ -329,15 +329,15 @@ class TemporalAggregator(nn.Module):
 
     def forward(self, feats_s16):
         """
-        Aggregate temporal context from 64 frames.
+        Aggregate temporal context from 15 frames.
 
         Args:
-            feats_s16: Features at s16 scale [B, 64, 256, H/16, W/16]
+            feats_s16: Features at s16 scale [B, 15, 256, H/16, W/16]
 
         Returns:
             Dictionary with:
                 - 'context': Aggregated temporal context [B, 256, H/16, W/16]
-                - 'attention_weights': Frame importance weights [B, 64]
+                - 'attention_weights': Frame importance weights [B, 15]
         """
         B, T, C, H, W = feats_s16.shape
 

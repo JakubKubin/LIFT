@@ -3,7 +3,7 @@ Stage 3: Multi-scale Flow Estimation
 
 Two-scale cascade (s8 -> s4) for bi-directional optical flow and occlusion prediction.
 Adapted from RIFE's IFNet with modifications for LIFT:
-- Accepts context from 64-frame transformer
+- Accepts context from 15-frame transformer
 - Predicts separate flows for each reference frame
 - Keeps occlusion maps in logit space until final output
 - Two-scale cascade instead of three
@@ -54,7 +54,7 @@ class FlowEstimationBlock(nn.Module):
     Total output: 6 channels (2+2+1+1)
     """
 
-    def __init__(self, in_channels, hidden_channels=64, num_res_blocks=8):
+    def __init__(self, in_channels, hidden_channels=15, num_res_blocks=8):
         super().__init__()
 
         # Initial downsampling and feature extraction
@@ -138,7 +138,7 @@ class FlowEstimator(nn.Module):
     Inputs:
     - Reference frames I_31 and I_32
     - Their features from encoder
-    - Context from 64-frame transformer
+    - Context from 15-frame transformer
     - Timestep t
 
     Outputs:
@@ -200,10 +200,10 @@ class FlowEstimator(nn.Module):
         I_32 = ref_frames[:, 1]  # [B, 3, H, W]
 
         # Extract features for each reference frame
-        feat_31_s8 = ref_feats_s8[:, 0]  # [B, 192, H/8, W/8]
-        feat_32_s8 = ref_feats_s8[:, 1]  # [B, 192, H/8, W/8]
-        feat_31_s4 = ref_feats_s4[:, 0]  # [B, 128, H/4, W/4]
-        feat_32_s4 = ref_feats_s4[:, 1]  # [B, 128, H/4, W/4]
+        feat_7_s8 = ref_feats_s8[:, 0]  # [B, 192, H/8, W/8]
+        feat_9_s8 = ref_feats_s8[:, 1]  # [B, 192, H/8, W/8]
+        feat_7_s4 = ref_feats_s4[:, 0]  # [B, 128, H/4, W/4]
+        feat_9_s4 = ref_feats_s4[:, 1]  # [B, 128, H/4, W/4]
 
         # Prepare timestep as spatial tensor
         if isinstance(timestep, torch.Tensor):
@@ -215,21 +215,21 @@ class FlowEstimator(nn.Module):
 
         # Stage 3.1: Coarse estimation at s8
         # Downsample context to s8
-        H_s8, W_s8 = feat_31_s8.shape[2], feat_31_s8.shape[3]
+        H_s8, W_s8 = feat_7_s8.shape[2], feat_7_s8.shape[3]
         context_s8 = F.interpolate(context, size=(H_s8, W_s8), mode='bilinear', align_corners=False)
 
         # Create timestep map at s8
         timestep_s8 = timestep.expand(-1, -1, H_s8, W_s8)
 
         # Concatenate all inputs for s8
-        input_s8 = torch.cat([feat_31_s8, feat_32_s8, context_s8, timestep_s8], dim=1)
+        input_s8 = torch.cat([feat_7_s8, feat_9_s8, context_s8, timestep_s8], dim=1)
 
         # Predict coarse flows and occlusion logits
         flow_s8, occ_logits_s8 = self.block_s8(input_s8, prev_flow=None, prev_occ_logits=None, scale=1)
 
         # Stage 3.2: Refinement at s4
         # Upsample flows from s8 to s4
-        H_s4, W_s4 = feat_31_s4.shape[2], feat_31_s4.shape[3]
+        H_s4, W_s4 = feat_7_s4.shape[2], feat_7_s4.shape[3]
         flow_s8_to_s4 = F.interpolate(flow_s8, size=(H_s4, W_s4), mode='bilinear', align_corners=False) * 2
         occ_logits_s8_to_s4 = F.interpolate(occ_logits_s8, size=(H_s4, W_s4), mode='bilinear', align_corners=False)
 
@@ -241,8 +241,8 @@ class FlowEstimator(nn.Module):
 
         # Concatenate all inputs for s4 refinement
         input_s4 = torch.cat([
-            feat_31_s4,
-            feat_32_s4,
+            feat_7_s4,
+            feat_9_s4,
             context_s4,
             flow_s8_to_s4,
             occ_logits_s8_to_s4,

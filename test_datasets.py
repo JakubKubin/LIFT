@@ -27,7 +27,7 @@ def test_x4k1000fps(data_root='/data/X4K1000FPS', batch_size=2, num_samples=5):
         dataset = X4K1000FPSDataset(
             data_root=data_root,
             mode='train',
-            num_frames=64,
+            num_frames=15,
             crop_size=(224, 224),
             augment=True,
             cache_frames=False
@@ -98,7 +98,7 @@ def test_ucf101(data_root='/data/UCF-101', batch_size=2, num_samples=5):
         dataset = UCF101Dataset(
             data_root=data_root,
             mode='train',
-            num_frames=64,
+            num_frames=15,
             crop_size=(224, 224),
             augment=True,
             cache_frames=False,

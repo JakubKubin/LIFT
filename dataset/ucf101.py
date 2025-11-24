@@ -18,7 +18,7 @@ import os
 import random
 from pathlib import Path
 from typing import List, Tuple
-from .base_video import BaseVideoDataset, VideoFrameExtractor
+from .base_video import BaseVideoDataset
 
 import sys
 # Ensure parent directory is in path to find configs
@@ -32,13 +32,13 @@ class UCF101Dataset(BaseVideoDataset):
     """
     UCF-101 action recognition dataset adapted for frame interpolation.
 
-    Extracts 64 consecutive frames from action videos for LIFT training.
+    Extracts 15 consecutive frames from action videos for LIFT training.
     """
 
     def __init__(self,
                  data_root: str = '/data/UCF-101',
                  mode: str = 'train',
-                 num_frames: int = 64,
+                 num_frames: int = 15,
                  crop_size: Tuple[int, int] = (224, 224),
                  augment: bool = True,
                  cache_frames: bool = False,
@@ -52,7 +52,7 @@ class UCF101Dataset(BaseVideoDataset):
         Args:
             data_root: Root directory (/data/UCF-101)
             mode: 'train', 'val', or 'test'
-            num_frames: Number of frames to extract (64 for LIFT)
+            num_frames: Number of frames to extract (15 for LIFT)
             crop_size: Size for random crop (H, W)
             augment: Apply augmentation
             cache_frames: Cache extracted frames (memory intensive)
@@ -127,7 +127,7 @@ class UCF101Dataset(BaseVideoDataset):
                         all_sequences.append((str(video_file), start_frame))
 
                 except Exception as e:
-                    # print(f"Warning: Error processing {video_file}: {e}")
+                    print(f"Warning: Error processing {video_file}: {e}")
                     continue
 
         if len(all_sequences) == 0:
@@ -154,7 +154,7 @@ class UCF101Dataset(BaseVideoDataset):
             self.video_list = all_sequences[train_end:val_end]
         else:  # test
             self.video_list = all_sequences[val_end:]
-        
+
         # Apply max_sequences limit AFTER splitting
         if self.max_sequences is not None:
             self.video_list = self.video_list[:self.max_sequences]
@@ -166,7 +166,7 @@ class UCF101Dataset(BaseVideoDataset):
         """
         attempts = 0
         max_attempts = 5
-        
+
         while attempts < max_attempts:
             try:
                 video_path, start_frame = self.video_list[idx]
@@ -190,7 +190,7 @@ class UCF101Dataset(BaseVideoDataset):
                 # Pick a new random index if the current one is corrupt
                 idx = random.randint(0, len(self.video_list) - 1)
                 attempts += 1
-        
+
         raise RuntimeError(f"Failed to load any video after {max_attempts} attempts")
 
 
@@ -241,7 +241,7 @@ if __name__ == '__main__':
         dataset = UCF101Dataset(
             data_root=data_root,
             mode='train',
-            num_frames=64,
+            num_frames=15,
             crop_size=(224, 224),
             augment=True,
             cache_frames=False,

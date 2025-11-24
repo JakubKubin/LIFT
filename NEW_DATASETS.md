@@ -76,7 +76,7 @@ from torch.utils.data import DataLoader
 dataset = X4K1000FPSDataset(
     data_root='/data/X4K1000FPS',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=True
 )
@@ -91,7 +91,7 @@ loader = DataLoader(
 
 # Train
 for batch in loader:
-    frames = batch['frames']        # [B, 64, 3, H, W]
+    frames = batch['frames']        # [B, 15, 3, H, W]
     ref_frames = batch['ref_frames'] # [B, 2, 3, H, W]
     gt = batch['gt']                # [B, 3, H, W]
     # ... training
@@ -107,11 +107,11 @@ for batch in loader:
 
 ### 2. Memory Management
 - **Optional caching**: Cache frames for repeated access
-- **Smart extraction**: Only load requested 64 frames
+- **Smart extraction**: Only load requested 15 frames
 - **Padding**: Handle short videos gracefully
 
 ### 3. Data Augmentation
-Applied consistently across all 64 frames:
+Applied consistently across all 15 frames:
 - Random crop
 - Random horizontal/vertical flip
 - Random rotation (90°, 180°, 270°)
@@ -123,7 +123,7 @@ Applied consistently across all 64 frames:
 - **Reproducible**: Fixed random seed (42)
 
 ### 5. Multiple Sequences per Video
-- Extracts all valid 64-frame sequences from each video
+- Extracts all valid 15-frame sequences from each video
 - Maximizes data utilization
 - Increases effective dataset size
 
@@ -132,12 +132,12 @@ Applied consistently across all 64 frames:
 ### X4K1000FPS (High-FPS videos)
 - Loading: ~0.5-1.0s per batch (4 sequences)
 - Throughput: ~4-8 sequences/second
-- Memory per batch: ~200 MB (4 × 64 frames × 224×224)
+- Memory per batch: ~2 MB (4 × 15 frames × 224×224)
 
 ### UCF-101 (Action videos)
 - Loading: ~0.3-0.7s per batch (4 sequences)
 - Throughput: ~6-12 sequences/second
-- Memory per batch: ~200 MB
+- Memory per batch: ~4 MB
 
 **Optimization tips**:
 - Use SSD for datasets (not HDD)
@@ -165,7 +165,7 @@ from dataset import X4K1000FPSDatasetWithRealGT
 dataset = X4K1000FPSDatasetWithRealGT(
     data_root='/data/X4K1000FPS',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(256, 256),  # Higher resolution
     augment=True
 )
@@ -180,7 +180,7 @@ from dataset import UCF101Dataset
 dataset = UCF101Dataset(
     data_root='/data/UCF-101',
     mode='train',
-    num_frames=64,
+    num_frames=15,
     crop_size=(224, 224),
     augment=True,
     train_split=0.7,
@@ -230,8 +230,8 @@ elif args.dataset == 'ucf101':
         ...
     )
 else:  # vimeo
-    from dataset import Vimeo64Dataset
-    train_dataset = Vimeo64Dataset(
+    from dataset import Vimeo15Dataset
+    train_dataset = Vimeo15Dataset(
         data_root=args.data_root,
         mode='train',
         ...
@@ -295,7 +295,7 @@ ls /data/UCF-101/ApplyEyeMakeup/*.avi
 LIFT/
 ├── dataset/
 │   ├── __init__.py          # Exports all datasets
-│   ├── vimeo_64.py          # Original Vimeo dataset
+│   ├── vimeo_15.py          # Original Vimeo dataset
 │   ├── base_video.py        # NEW: Base video dataset
 │   ├── x4k1000fps.py        # NEW: X4K1000FPS
 │   └── ucf101.py            # NEW: UCF-101
@@ -314,7 +314,7 @@ You now have three dataset options for LIFT:
 3. **UCF-101**: Action videos, diverse motion, good for generalization
 
 All three:
-- Support 64-frame sequences
+- Support 15-frame sequences
 - Memory-efficient lazy loading
 - Comprehensive augmentation
 - Train/val/test splits

@@ -72,13 +72,13 @@ class FullResolutionRefinement(nn.Module):
 
         # Channel reduction for memory efficiency
         # Input: 128 channels -> Output: 32 channels
-        self.reduce_feat_31 = nn.Conv2d(
+        self.reduce_feat_7 = nn.Conv2d(
             config.encoder_channels['s4'],
             config.refine_reduce_channels,
             kernel_size=1,
             bias=False
         )
-        self.reduce_feat_32 = nn.Conv2d(
+        self.reduce_feat_9 = nn.Conv2d(
             config.encoder_channels['s4'],
             config.refine_reduce_channels,
             kernel_size=1,
@@ -86,9 +86,9 @@ class FullResolutionRefinement(nn.Module):
         )
 
         # Refinement network
-        # Input: 3 (RGB) + 32 (feat_31) + 32 (feat_32) = 67 channels
+        # Input: 3 (RGB) + 32 (feat_7) + 32 (feat_9) = 67 channels
         input_channels = 3 + config.refine_reduce_channels * 2
-        hidden_channels = config.refine_channels[0]  # 64
+        hidden_channels = config.refine_channels[0]  # 15
 
         # Initial convolution
         self.conv_init = nn.Sequential(
@@ -141,29 +141,29 @@ class FullResolutionRefinement(nn.Module):
 
         # Step 5.2: Reduce channels of reference features
         # Extract individual reference frame features
-        feat_31_s4 = ref_feats_s4[:, 0]  # [B, 128, H/4, W/4]
-        feat_32_s4 = ref_feats_s4[:, 1]  # [B, 128, H/4, W/4]
+        feat_7_s4 = ref_feats_s4[:, 0]  # [B, 128, H/4, W/4]
+        feat_9_s4 = ref_feats_s4[:, 1]  # [B, 128, H/4, W/4]
 
         # Apply channel reduction (128 -> 32)
-        feat_31_reduced = self.reduce_feat_31(feat_31_s4)  # [B, 32, H/4, W/4]
-        feat_32_reduced = self.reduce_feat_32(feat_32_s4)  # [B, 32, H/4, W/4]
+        feat_7_reduced = self.reduce_feat_7(feat_7_s4)  # [B, 32, H/4, W/4]
+        feat_9_reduced = self.reduce_feat_9(feat_9_s4)  # [B, 32, H/4, W/4]
 
         # Step 5.3: Upsample reduced features to full resolution
-        feat_31_full = F.interpolate(
-            feat_31_reduced,
+        feat_7_full = F.interpolate(
+            feat_7_reduced,
             size=(H_full, W_full),
             mode='bilinear',
             align_corners=False
         )
-        feat_32_full = F.interpolate(
-            feat_32_reduced,
+        feat_9_full = F.interpolate(
+            feat_9_reduced,
             size=(H_full, W_full),
             mode='bilinear',
             align_corners=False
         )
 
         # Step 5.4: Concatenate all inputs
-        refine_input = torch.cat([upsampled_coarse, feat_31_full, feat_32_full], dim=1)
+        refine_input = torch.cat([upsampled_coarse, feat_7_full, feat_9_full], dim=1)
         # [B, 67, H, W]
 
         # Step 5.5: Process through refinement network

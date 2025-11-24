@@ -4,7 +4,7 @@ Stage 4: Coarse Frame Synthesis
 Synthesizes coarse interpolated frame at s4 resolution using:
 1. Backward warping of reference frames with predicted flows
 2. Occlusion-aware blending
-3. Context injection from 64-frame temporal aggregation
+3. Context injection from 15-frame temporal aggregation
 """
 
 import torch
@@ -23,13 +23,13 @@ def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
 
 class ContextInjectionNet(nn.Module):
     """
-    Lightweight network for injecting 64-frame temporal context.
+    Lightweight network for injecting 15-frame temporal context.
 
     Takes blended coarse frame and temporal context, outputs residual correction.
     Architecture: 2 convolutional layers as specified.
     """
 
-    def __init__(self, context_dim=256, hidden_dim=64):
+    def __init__(self, context_dim=256, hidden_dim=15):
         super().__init__()
 
         # Input: 3 (RGB) + context_dim channels
