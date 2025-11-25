@@ -47,7 +47,7 @@ class Config:
 
     # Training parameters
     batch_size = 10
-    num_epochs = 20
+    num_epochs = 50
     learning_rate = 3e-4
     weight_decay = 1e-3
     lr_warmup_steps = 2000

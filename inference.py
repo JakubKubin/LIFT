@@ -259,7 +259,8 @@ def main():
     print("Loading model...")
     config = Config()
 
-    checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    # --- FIX 1: Set weights_only=False to allow loading scalar configs ---
+    checkpoint = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
 
     # Load config from checkpoint if available
     if 'config' in checkpoint:
@@ -272,13 +273,12 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     model = LIFT(config).to(device)
 
-    # --- POPRAWKA: Bezpieczne ładowanie wag (filtrowanie mismatchu) ---
-    print(f"Loading checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
-
+    print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+    
+    # --- FIX 2: Safe weight loading (filters mismatched shapes like PE) ---
     model_state = model.state_dict()
     checkpoint_state = checkpoint['model_state_dict']
-
-    # Tworzymy nowy słownik, pomijając klucze o niezgodnych wymiarach
+    
     new_state_dict = {}
     for k, v in checkpoint_state.items():
         if k in model_state:
