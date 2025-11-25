@@ -111,7 +111,20 @@ def create_comparison_grid(
     if len(grids) == 0:
         return torch.zeros(3, 64, 64)
 
-    final_grid = torch.cat(grids, dim=1)
+    # Find maximum width to pad all grids to same size
+    max_width = max(g.shape[2] for g in grids)
+
+    # Pad all grids to have the same width
+    padded_grids = []
+    for grid in grids:
+        if grid.shape[2] < max_width:
+            # Pad on the right to match max_width
+            pad_amount = max_width - grid.shape[2]
+            grid = F.pad(grid, (0, pad_amount, 0, 0), mode='constant', value=0)
+        padded_grids.append(grid)
+
+    # Now concatenate vertically (along height dimension)
+    final_grid = torch.cat(padded_grids, dim=1)
     return final_grid
 
 

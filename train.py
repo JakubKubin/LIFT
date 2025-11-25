@@ -31,6 +31,7 @@ from utils.visualization import (
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
 
+# Import all available datasets
 from dataset import (
     Vimeo15Dataset,
     X4K1000FPSDataset,
@@ -121,14 +122,7 @@ class TensorBoardLogger:
         self.writer.add_text('model/architecture', arch_text, 0)
 
     def log_scalars(self, tag_prefix: str, scalars: dict, step: int):
-        """
-        Log multiple scalar values.
-
-        Args:
-            tag_prefix: Prefix for tags (e.g., 'train', 'val')
-            scalars: Dictionary of scalar values
-            step: Global step
-        """
+        """Log multiple scalar values."""
         for name, value in scalars.items():
             if isinstance(value, torch.Tensor):
                 value = value.item()
@@ -145,19 +139,7 @@ class TensorBoardLogger:
         model: Optional[nn.Module] = None,
         batch_time: Optional[float] = None
     ):
-        """
-        Log training step metrics.
-
-        Args:
-            step: Global step
-            losses: Dictionary of loss values
-            lr: Current learning rate
-            outputs: Model outputs (optional, for image logging)
-            gt: Ground truth frames (optional)
-            ref_frames: Reference frames (optional)
-            model: Model for gradient logging (optional)
-            batch_time: Time for batch processing (optional)
-        """
+        """Log training step metrics."""
         if step % self.scalar_interval == 0:
             self.writer.add_scalar('train/loss_total', losses['total'].item(), step)
             self.writer.add_scalar('train/loss_l1', losses['l1'].item(), step)
@@ -235,36 +217,22 @@ class TensorBoardLogger:
             self.writer.add_images('train/flow_magnitude_I9',
                                   flow_mag_9.unsqueeze(1) / (flow_mag_9.max() + 1e-8), step)
 
-            fig_hist_7 = plot_flow_histogram(
-                flow_7[:n_samples],
-                title=f"Flow I7→I8 Distribution (Step {step})"
-            )
-            self.writer.add_figure('train/flow_histogram_I7', fig_hist_7, step)
-            plt.close(fig_hist_7)
-
-            fig_hist_9 = plot_flow_histogram(
-                flow_9[:n_samples],
-                title=f"Flow I9→I8 Distribution (Step {step})"
-            )
-            self.writer.add_figure('train/flow_histogram_I9', fig_hist_9, step)
-            plt.close(fig_hist_9)
-
         if 'occlusions' in outputs:
-            occ_7 = outputs['occlusions']['occ_7'][:n_samples]
-            occ_9 = outputs['occlusions']['occ_9'][:n_samples]
+            occ_31 = outputs['occlusions']['occ_31'][:n_samples]
+            occ_32 = outputs['occlusions']['occ_32'][:n_samples]
 
-            self.writer.add_images('train/occlusion_I7', occ_7, step)
-            self.writer.add_images('train/occlusion_I9', occ_9, step)
+            self.writer.add_images('train/occlusion_I7', occ_31, step)
+            self.writer.add_images('train/occlusion_I9', occ_32, step)
 
-            occ_diff = occ_7 - occ_9
+            occ_diff = occ_31 - occ_32
             occ_diff_vis = (occ_diff + 1) / 2
             self.writer.add_images('train/occlusion_difference', occ_diff_vis, step)
 
         if 'warped' in outputs:
             self.writer.add_images('train/warped_from_I7',
-                                  outputs['warped']['warped_7'][:n_samples].clamp(0, 1), step)
+                                  outputs['warped']['warped_31'][:n_samples].clamp(0, 1), step)
             self.writer.add_images('train/warped_from_I9',
-                                  outputs['warped']['warped_9'][:n_samples].clamp(0, 1), step)
+                                  outputs['warped']['warped_32'][:n_samples].clamp(0, 1), step)
 
         if 'coarse' in outputs:
             coarse_up = F.interpolate(outputs['coarse'][:n_samples],
@@ -309,13 +277,6 @@ class TensorBoardLogger:
                 avg_norm = sum(matching.values()) / len(matching)
                 self.writer.add_scalar(f'gradients/{name}_avg_norm', avg_norm, step)
 
-        grad_stats = compute_gradient_stats(model)
-
-        for module_name, stats in grad_stats.items():
-            self.writer.add_scalar(f'gradients/{module_name}/mean', stats['mean'], step)
-            self.writer.add_scalar(f'gradients/{module_name}/std', stats['std'], step)
-            self.writer.add_scalar(f'gradients/{module_name}/max', stats['max'], step)
-
     def _log_histograms(self, step: int, outputs: dict):
         """Log tensor histograms."""
         pred = outputs['prediction']
@@ -340,18 +301,7 @@ class TensorBoardLogger:
         gt: Optional[torch.Tensor] = None,
         ref_frames: Optional[torch.Tensor] = None
     ):
-        """
-        Log validation metrics and visualizations.
-
-        Args:
-            epoch: Current epoch
-            avg_losses: Average losses over validation set
-            avg_psnr: Average PSNR
-            avg_ssim: Average SSIM (optional)
-            outputs: Sample outputs for visualization (optional)
-            gt: Sample ground truth (optional)
-            ref_frames: Sample reference frames (optional)
-        """
+        """Log validation metrics."""
         self.writer.add_scalar('val/loss_total', avg_losses['total'], epoch)
         self.writer.add_scalar('val/loss_l1', avg_losses['l1'], epoch)
         self.writer.add_scalar('val/loss_lap', avg_losses.get('lap', 0), epoch)
@@ -394,52 +344,18 @@ class TensorBoardLogger:
             self.writer.add_images('val/flow_I7_to_I8', flow_7_vis, epoch)
             self.writer.add_images('val/flow_I9_to_I8', flow_9_vis, epoch)
 
-            fig_hist_val_7 = plot_flow_histogram(
-                outputs['flows']['flow_7'][:n_samples],
-                title=f"Val Flow I7→I8 Distribution (Epoch {epoch})"
-            )
-            self.writer.add_figure('val/flow_histogram_I7', fig_hist_val_7, epoch)
-            plt.close(fig_hist_val_7)
-
-            fig_hist_val_9 = plot_flow_histogram(
-                outputs['flows']['flow_9'][:n_samples],
-                title=f"Val Flow I9→I8 Distribution (Epoch {epoch})"
-            )
-            self.writer.add_figure('val/flow_histogram_I9', fig_hist_val_9, epoch)
-            plt.close(fig_hist_val_9)
-
         if 'occlusions' in outputs:
             self.writer.add_images('val/occlusion_I7',
-                                  outputs['occlusions']['occ_7'][:n_samples], epoch)
+                                  outputs['occlusions']['occ_31'][:n_samples], epoch)
             self.writer.add_images('val/occlusion_I9',
-                                  outputs['occlusions']['occ_9'][:n_samples], epoch)
+                                  outputs['occlusions']['occ_32'][:n_samples], epoch)
 
             fig = visualize_occlusion_maps(
-                outputs['occlusions']['occ_7'][:1],
-                outputs['occlusions']['occ_9'][:1]
+                outputs['occlusions']['occ_31'][:1],
+                outputs['occlusions']['occ_32'][:1]
             )
             self.writer.add_figure('val/occlusion_analysis', fig, epoch)
             plt.close(fig)
-
-        comparison_dict = {
-            'prediction': pred[:n_samples],
-            'ground_truth': gt[:n_samples],
-        }
-
-        if ref_frames is not None:
-            comparison_dict['ref_I7'] = ref_frames[:n_samples, 0]
-            comparison_dict['ref_I9'] = ref_frames[:n_samples, 1]
-
-        if 'flows' in outputs:
-            comparison_dict['flow_I7_to_I8'] = outputs['flows']['flow_7'][:n_samples]
-            comparison_dict['flow_I9_to_I8'] = outputs['flows']['flow_9'][:n_samples]
-
-        comparison_grid = create_comparison_grid(
-            comparison_dict,
-            nrow=n_samples,
-            padding=2
-        )
-        self.writer.add_images('val/comparison_grid', comparison_grid.unsqueeze(0), epoch)
 
         if 'attention_weights' in outputs:
             fig = plot_attention_weights(
@@ -498,9 +414,7 @@ def get_optimizer(model, config):
 
 
 def get_lr_scheduler(optimizer, config, steps_per_epoch):
-    """
-    Create learning rate scheduler with warmup and cosine decay.
-    """
+    """Create learning rate scheduler."""
     def lr_lambda(step):
         if step < config.lr_warmup_steps:
             return step / config.lr_warmup_steps
@@ -515,14 +429,14 @@ def get_lr_scheduler(optimizer, config, steps_per_epoch):
 
 
 def compute_psnr(pred, target) -> torch.Tensor:
-    """Compute PSNR between predicted and target images."""
+    """Compute PSNR."""
     mse = torch.mean((pred - target) ** 2)
     if mse == 0:
         return torch.tensor(float('inf'))
     return -10 * torch.log10(mse)
 
 
-def train_epoch(model: LIFT, dataloader, optimizer, scheduler, loss_fn: LIFTLoss, device, epoch, config, writer, global_step, scaler):
+def train_epoch(model: LIFT, dataloader, optimizer, scheduler, loss_fn: LIFTLoss, device, epoch, config, logger: TensorBoardLogger, global_step, scaler):
     """Train for one epoch."""
     model.train()
     model.set_epoch(epoch)
@@ -538,6 +452,8 @@ def train_epoch(model: LIFT, dataloader, optimizer, scheduler, loss_fn: LIFTLoss
 
     pbar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
 
+    start_time = time.time()
+
     for step, batch in enumerate(pbar):
         frames = batch['frames'].to(device, non_blocking=True)
         ref_frames = batch['ref_frames'].to(device, non_blocking=True)
@@ -552,24 +468,36 @@ def train_epoch(model: LIFT, dataloader, optimizer, scheduler, loss_fn: LIFTLoss
 
             losses = loss_fn(
                 pred, gt,
-                flow1=outputs['flows']['flow_7'],
-                flow2=outputs['flows']['flow_9'],
-                logit_occ1=outputs['occlusions']['logit_occ_7'],
-                logit_occ2=outputs['occlusions']['logit_occ_9'],
-                warped1=outputs['warped']['warped_7'],
-                warped2=outputs['warped']['warped_9']
+                flow1=outputs['flows']['flow_31'],
+                flow2=outputs['flows']['flow_32'],
+                logit_occ1=outputs['occlusions']['logit_occ_31'],
+                logit_occ2=outputs['occlusions']['logit_occ_32'],
+                warped1=outputs['warped']['warped_31'],
+                warped2=outputs['warped']['warped_32']
             )
             loss = losses['total']
 
         scaler.scale(loss).backward()
-
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip)
-
         scaler.step(optimizer)
         scaler.update()
-
         scheduler.step()
+
+        batch_time = time.time() - start_time
+        start_time = time.time()
+
+        logger.log_training_step(
+            step=global_step,
+            losses=losses,
+            lr=scheduler.get_last_lr()[0],
+            outputs=outputs,
+            gt=gt,
+            ref_frames=ref_frames,
+            model=model,
+            batch_time=batch_time
+        )
+        # -------------------------------------------------------
 
         for key in total_losses.keys():
             if key in losses:
@@ -581,24 +509,13 @@ def train_epoch(model: LIFT, dataloader, optimizer, scheduler, loss_fn: LIFTLoss
             'lr': f'{scheduler.get_last_lr()[0]:.2e}'
         })
 
-        if global_step % config.log_interval == 0:
-            writer.add_scalar('train/loss_total', loss.item(), global_step)
-            writer.add_scalar('train/loss_l1', losses['l1'].item(), global_step)
-            writer.add_scalar('train/loss_lap', losses['lap'].item(), global_step)
-            writer.add_scalar('train/lr', scheduler.get_last_lr()[0], global_step)
-
-            if step % 100 == 0:
-                vram_gb = torch.cuda.memory_allocated() / 1e9
-                writer.add_scalar('system/vram_gb', vram_gb, global_step)
-
         global_step += 1
 
     avg_losses = {k: v / num_batches for k, v in total_losses.items()}
-
     return avg_losses, global_step
 
 
-def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, writer):
+def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, logger: TensorBoardLogger):
     """Validation loop."""
     model.eval()
 
@@ -610,8 +527,12 @@ def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, 
     total_psnr = 0.0
     num_batches = 0
 
+    sample_outputs = None
+    sample_gt = None
+    sample_ref = None
+
     with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Validation"):
+        for i, batch in enumerate(tqdm(dataloader, desc="Validation")):
             frames = batch['frames'].to(device, non_blocking=True)
             ref_frames = batch['ref_frames'].to(device, non_blocking=True)
             gt = batch['gt'].to(device, non_blocking=True)
@@ -621,6 +542,11 @@ def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, 
                 outputs = model(frames, ref_frames, timestep[0].item())
                 pred = outputs['prediction']
                 losses = loss_fn(pred, gt)
+
+            if i == 0:
+                sample_outputs = outputs
+                sample_gt = gt
+                sample_ref = ref_frames
 
             psnr = compute_psnr(pred.float(), gt.float())
 
@@ -633,9 +559,15 @@ def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, 
     avg_losses = {k: v / num_batches for k, v in total_losses.items()}
     avg_psnr = total_psnr / num_batches
 
-    writer.add_scalar('val/loss_total', avg_losses['total'], epoch)
-    writer.add_scalar('val/loss_l1', avg_losses['l1'], epoch)
-    writer.add_scalar('val/psnr', avg_psnr, epoch)
+    logger.log_validation(
+        epoch=epoch,
+        avg_losses=avg_losses,
+        avg_psnr=avg_psnr,
+        outputs=sample_outputs,
+        gt=sample_gt,
+        ref_frames=sample_ref
+    )
+    # -----------------------------------------------
 
     return avg_losses, avg_psnr
 
@@ -794,7 +726,7 @@ def main():
     global_step = 0
     if args.checkpoint:
         print(f"\nLoading checkpoint from {args.checkpoint}")
-        checkpoint = torch.load(args.checkpoint, map_location=device)
+        checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
 
         model_state = model.state_dict()
         checkpoint_state = checkpoint['model_state_dict']
@@ -806,6 +738,8 @@ def main():
                     new_state_dict[k] = v
                 else:
                     print(f"Skipping {k} due to shape mismatch: checkpoint {v.shape} vs model {model_state[k].shape}")
+            else:
+                pass
 
         model.load_state_dict(new_state_dict, strict=False)
 
@@ -824,17 +758,20 @@ def main():
     best_val_loss = float('inf')
 
     for epoch in range(start_epoch, config.num_epochs):
+        # Train
         train_losses, global_step = train_epoch(
             model, train_loader, optimizer, scheduler,
-            loss_fn, device, epoch, config, logger.writer, global_step, scaler
+            loss_fn, device, epoch, config, logger, global_step, scaler
         )
         print(f"Epoch {epoch+1}: Train Loss: {train_losses['total']:.4f} (L1: {train_losses['l1']:.4f})")
 
+        # Log epoch summary
         logger.log_epoch_summary(epoch + 1, train_losses)
         logger.log_encoder_status(epoch + 1, epoch < getattr(config, 'freeze_encoder_epochs', 10))
 
+        # Validate
         if (epoch + 1) % config.val_interval == 0 or (epoch + 1) % 2 == 0:
-            val_losses, val_psnr = validate(model, val_loader, loss_fn, device, epoch, config, logger.writer)
+            val_losses, val_psnr = validate(model, val_loader, loss_fn, device, epoch, config, logger)
             print(f"Epoch {epoch+1}: Val Loss: {val_losses['total']:.4f} | PSNR: {val_psnr:.2f} dB")
 
             logger.log_epoch_summary(epoch + 1, train_losses, val_losses, val_psnr)
