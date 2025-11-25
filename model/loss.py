@@ -45,7 +45,7 @@ def gaussian_kernel(size=5, sigma=1.0, channels=3):
 class GaussianBlur(nn.Module):
     """Gaussian blur operation for pyramid construction."""
 
-    kernel: torch.Tensor  # Type hint for registered buffer
+    kernel: torch.Tensor
 
     def __init__(self, channels=3):
         super().__init__()
@@ -339,7 +339,6 @@ class LIFTLoss(nn.Module):
 
 
 if __name__ == '__main__':
-    # Test losses
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Create test tensors

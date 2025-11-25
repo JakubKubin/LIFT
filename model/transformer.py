@@ -22,7 +22,7 @@ class DepthwiseSeparableConv(nn.Module):
             in_channels, in_channels,
             kernel_size=kernel_size,
             padding=padding,
-            groups=in_channels,  # Each channel processed separately
+            groups=in_channels,
             bias=False
         )
         self.pointwise = nn.Conv2d(
@@ -188,8 +188,6 @@ class TemporalAggregator(nn.Module):
         self.num_heads = config.transformer_heads
         self.patch_size = config.spatial_patch_size
 
-        # Determine patch projection
-        # Note: Input features are at s16 scale.
         # encoder_channels['s16'] = 256
         # patch_size = 2
         # patch_dim = 256 * 2 * 2 = 1024
@@ -340,13 +338,16 @@ class TemporalAggregator(nn.Module):
 
 
 if __name__ == '__main__':
-    # Test temporal aggregator
+    from pathlib import Path
+    import sys
+
+    sys.path.append(str(Path(__file__).parent.parent))
     from configs.default import Config
 
     config = Config()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Create test input dynamically
+    # Create test
     num_test_frames = config.model_frames
     feats_s16 = torch.rand(2, num_test_frames, 256, 16, 16).to(device)
 
@@ -364,7 +365,3 @@ if __name__ == '__main__':
     print(f"  Min: {output['attention_weights'][0].min():.4f}")
     print(f"  Max: {output['attention_weights'][0].max():.4f}")
     print(f"  Sum: {output['attention_weights'][0].sum():.4f}")
-
-    # Check memory usage
-    if torch.cuda.is_available():
-        print(f"\nGPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")

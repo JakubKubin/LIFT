@@ -51,10 +51,10 @@ def check_batch_size(max_batch_to_try=32):
             # Loss computation
             losses = loss_fn(
                 pred, gt,
-                flow1=outputs['flows']['flow_31'],
-                flow2=outputs['flows']['flow_32'],
-                occ1=outputs['occlusions']['occ_31'],
-                occ2=outputs['occlusions']['occ_32']
+                flow1=outputs['flows']['flow_7'],
+                flow2=outputs['flows']['flow_9'],
+                occ1=outputs['occlusions']['occ_7'],
+                occ2=outputs['occlusions']['occ_9']
             )
             loss = losses['total']
 

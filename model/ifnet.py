@@ -46,10 +46,10 @@ class FlowEstimationBlock(nn.Module):
     Single-scale flow estimation block.
 
     Predicts:
-    - flow_31: Flow from I_31 to I_t [B, 2, H, W]
-    - flow_32: Flow from I_32 to I_t [B, 2, H, W]
-    - logit_occ_31: Occlusion logits for frame 31 [B, 1, H, W]
-    - logit_occ_32: Occlusion logits for frame 32 [B, 1, H, W]
+    - flow_7: Flow from I_7 to I_t [B, 2, H, W]
+    - flow_9: Flow from I_9 to I_t [B, 2, H, W]
+    - logit_occ_7: Occlusion logits for frame 7 [B, 1, H, W]
+    - logit_occ_9: Occlusion logits for frame 9 [B, 1, H, W]
 
     Total output: 6 channels (2+2+1+1)
     """
@@ -86,7 +86,7 @@ class FlowEstimationBlock(nn.Module):
             scale: Scale factor for current resolution
 
         Returns:
-            flow: Predicted flows [B, 4, H, W] (flow_31 + flow_32)
+            flow: Predicted flows [B, 4, H, W] (flow_7 + flow_9)
             occ_logits: Occlusion logits [B, 2, H, W]
         """
         # Downsample input if scale != 1
@@ -136,14 +136,14 @@ class FlowEstimator(nn.Module):
     2. Refinement at scale s4 (1/4 resolution)
 
     Inputs:
-    - Reference frames I_31 and I_32
+    - Reference frames I_7 and I_9
     - Their features from encoder
     - Context from 15-frame transformer
     - Timestep t
 
     Outputs:
-    - Bi-directional flows: flow_31, flow_32
-    - Occlusion maps: O_31, O_32 (after sigmoid)
+    - Bi-directional flows: flow_7, flow_9
+    - Occlusion maps: O_7, O_9 (after sigmoid)
     """
 
     def __init__(self, config):
@@ -185,19 +185,19 @@ class FlowEstimator(nn.Module):
 
         Returns:
             Dictionary with:
-                - 'flow_31': Flow from frame 31 to target [B, 2, H/4, W/4]
-                - 'flow_32': Flow from frame 32 to target [B, 2, H/4, W/4]
-                - 'occ_31': Occlusion map for frame 31 [B, 1, H/4, W/4]
-                - 'occ_32': Occlusion map for frame 32 [B, 1, H/4, W/4]
-                - 'logit_occ_31': Occlusion logits for frame 31 (before sigmoid)
-                - 'logit_occ_32': Occlusion logits for frame 32 (before sigmoid)
+                - 'flow_7': Flow from frame 7 to target [B, 2, H/4, W/4]
+                - 'flow_9': Flow from frame 9 to target [B, 2, H/4, W/4]
+                - 'occ_7': Occlusion map for frame 7 [B, 1, H/4, W/4]
+                - 'occ_9': Occlusion map for frame 9 [B, 1, H/4, W/4]
+                - 'logit_occ_7': Occlusion logits for frame 7 (before sigmoid)
+                - 'logit_occ_9': Occlusion logits for frame 9 (before sigmoid)
         """
         B = ref_frames.shape[0]
         device = ref_frames.device
 
         # Extract individual reference frames
-        I_31 = ref_frames[:, 0]  # [B, 3, H, W]
-        I_32 = ref_frames[:, 1]  # [B, 3, H, W]
+        I_7 = ref_frames[:, 0]  # [B, 3, H, W]
+        I_9 = ref_frames[:, 1]  # [B, 3, H, W]
 
         # Extract features for each reference frame
         feat_7_s8 = ref_feats_s8[:, 0]  # [B, 192, H/8, W/8]
@@ -262,22 +262,22 @@ class FlowEstimator(nn.Module):
         occ_logits_s4 = occ_logits_s8_to_s4 + occ_logits_residual_s4
 
         # Split flows and occlusion logits
-        flow_31 = flow_s4[:, :2]   # [B, 2, H/4, W/4]
-        flow_32 = flow_s4[:, 2:4]  # [B, 2, H/4, W/4]
-        logit_occ_31 = occ_logits_s4[:, 0:1]  # [B, 1, H/4, W/4]
-        logit_occ_32 = occ_logits_s4[:, 1:2]  # [B, 1, H/4, W/4]
+        flow_7 = flow_s4[:, :2]   # [B, 2, H/4, W/4]
+        flow_9 = flow_s4[:, 2:4]  # [B, 2, H/4, W/4]
+        logit_occ_7 = occ_logits_s4[:, 0:1]  # [B, 1, H/4, W/4]
+        logit_occ_9 = occ_logits_s4[:, 1:2]  # [B, 1, H/4, W/4]
 
         # Apply sigmoid to get final occlusion maps
-        occ_31 = torch.sigmoid(logit_occ_31)
-        occ_32 = torch.sigmoid(logit_occ_32)
+        occ_7 = torch.sigmoid(logit_occ_7)
+        occ_9 = torch.sigmoid(logit_occ_9)
 
         return {
-            'flow_31': flow_31,
-            'flow_32': flow_32,
-            'occ_31': occ_31,
-            'occ_32': occ_32,
-            'logit_occ_31': logit_occ_31,
-            'logit_occ_32': logit_occ_32,
+            'flow_7': flow_7,
+            'flow_9': flow_9,
+            'occ_7': occ_7,
+            'occ_9': occ_9,
+            'logit_occ_7': logit_occ_7,
+            'logit_occ_9': logit_occ_9,
             'flows_combined': flow_s4,  # For convenience [B, 4, H/4, W/4]
         }
 
@@ -311,10 +311,5 @@ if __name__ == '__main__':
 
     # Verify occlusion maps are in [0, 1]
     print(f"\nOcclusion map ranges:")
-    print(f"  occ_31: [{output['occ_31'].min():.4f}, {output['occ_31'].max():.4f}]")
-    print(f"  occ_32: [{output['occ_32'].min():.4f}, {output['occ_32'].max():.4f}]")
-
-    # Check memory usage
-    if torch.cuda.is_available():
-        print(f"\nGPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
-        print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+    print(f"  occ_7: [{output['occ_7'].min():.4f}, {output['occ_7'].max():.4f}]")
+    print(f"  occ_9: [{output['occ_9'].min():.4f}, {output['occ_9'].max():.4f}]")

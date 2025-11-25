@@ -204,7 +204,8 @@ class X4K1000FPSDatasetWithRealGT(X4K1000FPSDataset):
 if __name__ == '__main__':
     # Test X4K1000FPS dataset
     import sys
-    sys.path.append('..')
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
 
     print("Testing X4K1000FPS Dataset...")
 

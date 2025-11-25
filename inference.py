@@ -109,25 +109,25 @@ def interpolate_sequence(model, frames, timestep=0.5, device='cuda'):
 def pad_sequence(frames, target_length):
     """
     Pad sequence to target length by repeating the last frame.
-    
+
     Args:
         frames: [B, T, C, H, W]
         target_length: int
-        
+
     Returns:
         Padded frames [B, target_length, C, H, W]
     """
     B, T, C, H, W = frames.shape
     if T >= target_length:
         return frames
-    
+
     diff = target_length - T
     print(f"Padding input sequence from {T} to {target_length} frames (repeating last frame)...")
-    
+
     # Create padding by repeating the last frame
     last_frame = frames[:, -1:].repeat(1, diff, 1, 1, 1)
     padded = torch.cat([frames, last_frame], dim=1)
-    
+
     return padded
 
 
@@ -139,7 +139,7 @@ def run_image_mode(args, model, device, config):
     # If user specified num_frames, try to load that many.
     # If directory has fewer, load_frames_from_directory will load what's available.
     req_frames = args.num_frames if args.num_frames else config.num_frames
-    
+
     frames = load_frames_from_directory(args.input, num_frames=req_frames)
     print(f"Loaded input tensor: {frames.shape}")
 
@@ -259,7 +259,7 @@ def main():
     print("Loading model...")
     config = Config()
 
-    # --- FIX 1: Set weights_only=False to allow loading scalar configs ---
+    # Safe weight loading (filters mismatched shapes like PE)
     checkpoint = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
 
     # Load config from checkpoint if available
@@ -274,11 +274,11 @@ def main():
     model = LIFT(config).to(device)
 
     print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
-    
-    # --- FIX 2: Safe weight loading (filters mismatched shapes like PE) ---
+
+    # Safe weight loading (filters mismatched shapes like PE)
     model_state = model.state_dict()
     checkpoint_state = checkpoint['model_state_dict']
-    
+
     new_state_dict = {}
     for k, v in checkpoint_state.items():
         if k in model_state:
@@ -287,9 +287,8 @@ def main():
             else:
                 print(f"Skipping {k} due to shape mismatch: checkpoint {v.shape} vs model {model_state[k].shape}")
 
-    # Ładujemy przefiltrowane wagi (strict=False pozwala na brakujące bufory PE)
+    # Loading filtered weights (strict=False allows missing PE buffers)
     model.load_state_dict(new_state_dict, strict=False)
-    # ------------------------------------------------------------------
 
     if args.mode == 'image':
         run_image_mode(args, model, device, config)

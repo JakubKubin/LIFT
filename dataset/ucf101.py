@@ -21,7 +21,6 @@ from typing import List, Tuple
 from .base_video import BaseVideoDataset
 
 import sys
-# Ensure parent directory is in path to find configs
 sys.path.append(str(Path(__file__).parent.parent))
 
 from configs.default import Config
@@ -47,7 +46,7 @@ class UCF101Dataset(BaseVideoDataset):
                  use_official_splits: bool = False,
                  split_file: str | None = None,
                  input_scale: float = 1.0,
-                 max_sequences: int | None = None): # Add max_sequences
+                 max_sequences: int | None = None):
         """
         Args:
             data_root: Root directory (/data/UCF-101)
@@ -66,7 +65,7 @@ class UCF101Dataset(BaseVideoDataset):
         self.split_file = split_file
         self.train_split = train_split
         self.val_split = val_split
-        self.max_sequences = max_sequences # Store max_sequences
+        self.max_sequences = max_sequences
 
         super().__init__(data_root, mode, num_frames, crop_size, augment, cache_frames, input_scale)
 
@@ -207,7 +206,7 @@ class UCF101Dataset(BaseVideoDataset):
 
 def create_ucf101_with_official_splits(data_root: str = '/data/UCF-101',
                                        splits_root: str = '/data/UCF-101/ucfTrainTestlist',
-                                       max_sequences: int | None = None): # Add max_sequences
+                                       max_sequences: int | None = None):
     """Helper function to create UCF-101 datasets with official train/test splits."""
     train_split_file = os.path.join(splits_root, 'trainlist01.txt')
     test_split_file = os.path.join(splits_root, 'testlist01.txt')
@@ -257,7 +256,7 @@ if __name__ == '__main__':
             augment=True,
             cache_frames=False,
             use_official_splits=False,
-            max_sequences=100 # Limit to 100
+            max_sequences=100
         )
 
         print(f"Dataset loaded successfully!")

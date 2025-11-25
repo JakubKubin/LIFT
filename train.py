@@ -39,10 +39,8 @@ from dataset import (
     collate_fn
 )
 from model import LIFT, LIFTLoss
-from configs.default import Config
 
 torch.backends.cudnn.benchmark = True
-
 
 class TensorBoardLogger:
     """
@@ -115,7 +113,7 @@ class TensorBoardLogger:
 ### Modules
 - Encoder: FrameEncoder (s1, s4, s8, s16 features)
 - Transformer: TemporalAggregator ({self.config.transformer_layers} layers)
-- Flow Estimator: 2-scale cascade (s8 → s4)
+- Flow Estimator: 2-scale cascade (s8 -> s4)
 - Synthesis: Occlusion-aware blending + Context injection
 - Refinement: Full-resolution with s1 features
 """
@@ -176,7 +174,7 @@ class TensorBoardLogger:
 
             if batch_time is not None:
                 self.writer.add_scalar('system/batch_time_ms', batch_time * 1000, step)
-                self.writer.add_scalar('system/throughput_samples_sec', 
+                self.writer.add_scalar('system/throughput_samples_sec',
                                       self.config.batch_size / batch_time, step)
 
             if torch.cuda.is_available():
@@ -205,56 +203,56 @@ class TensorBoardLogger:
         pred = outputs['prediction']
         n_samples = min(4, pred.shape[0])
 
-        self.writer.add_images('train/prediction', 
+        self.writer.add_images('train/prediction',
                               pred[:n_samples].clamp(0, 1), step)
-        self.writer.add_images('train/ground_truth', 
+        self.writer.add_images('train/ground_truth',
                               gt[:n_samples].clamp(0, 1), step)
 
         error_map = create_error_map(pred[:n_samples], gt[:n_samples])
         self.writer.add_images('train/error_map', error_map, step)
 
         if ref_frames is not None:
-            self.writer.add_images('train/ref_frame_I7', 
+            self.writer.add_images('train/ref_frame_I7',
                                   ref_frames[:n_samples, 0].clamp(0, 1), step)
-            self.writer.add_images('train/ref_frame_I9', 
+            self.writer.add_images('train/ref_frame_I9',
                                   ref_frames[:n_samples, 1].clamp(0, 1), step)
 
         if 'flows' in outputs:
-            flow_31 = outputs['flows']['flow_31'][:n_samples]
-            flow_32 = outputs['flows']['flow_32'][:n_samples]
+            flow_7 = outputs['flows']['flow_7'][:n_samples]
+            flow_9 = outputs['flows']['flow_9'][:n_samples]
 
-            flow_31_vis = flow_to_color(flow_31)
-            flow_32_vis = flow_to_color(flow_32)
+            flow_7_vis = flow_to_color(flow_7)
+            flow_9_vis = flow_to_color(flow_9)
 
-            self.writer.add_images('train/flow_I7_to_I8', flow_31_vis, step)
-            self.writer.add_images('train/flow_I9_to_I8', flow_32_vis, step)
+            self.writer.add_images('train/flow_I7_to_I8', flow_7_vis, step)
+            self.writer.add_images('train/flow_I9_to_I8', flow_9_vis, step)
 
-            flow_mag_31 = torch.sqrt(flow_31[:, 0]**2 + flow_31[:, 1]**2)
-            flow_mag_32 = torch.sqrt(flow_32[:, 0]**2 + flow_32[:, 1]**2)
-            self.writer.add_images('train/flow_magnitude_I7', 
+            flow_mag_31 = torch.sqrt(flow_7[:, 0]**2 + flow_7[:, 1]**2)
+            flow_mag_32 = torch.sqrt(flow_9[:, 0]**2 + flow_9[:, 1]**2)
+            self.writer.add_images('train/flow_magnitude_I7',
                                   flow_mag_31.unsqueeze(1) / (flow_mag_31.max() + 1e-8), step)
-            self.writer.add_images('train/flow_magnitude_I9', 
+            self.writer.add_images('train/flow_magnitude_I9',
                                   flow_mag_32.unsqueeze(1) / (flow_mag_32.max() + 1e-8), step)
 
         if 'occlusions' in outputs:
-            occ_31 = outputs['occlusions']['occ_31'][:n_samples]
-            occ_32 = outputs['occlusions']['occ_32'][:n_samples]
+            occ_7 = outputs['occlusions']['occ_7'][:n_samples]
+            occ_9 = outputs['occlusions']['occ_9'][:n_samples]
 
-            self.writer.add_images('train/occlusion_I7', occ_31, step)
-            self.writer.add_images('train/occlusion_I9', occ_32, step)
+            self.writer.add_images('train/occlusion_I7', occ_7, step)
+            self.writer.add_images('train/occlusion_I9', occ_9, step)
 
-            occ_diff = occ_31 - occ_32
+            occ_diff = occ_7 - occ_9
             occ_diff_vis = (occ_diff + 1) / 2
             self.writer.add_images('train/occlusion_difference', occ_diff_vis, step)
 
         if 'warped' in outputs:
-            self.writer.add_images('train/warped_from_I7', 
-                                  outputs['warped']['warped_31'][:n_samples].clamp(0, 1), step)
-            self.writer.add_images('train/warped_from_I9', 
-                                  outputs['warped']['warped_32'][:n_samples].clamp(0, 1), step)
+            self.writer.add_images('train/warped_from_I7',
+                                  outputs['warped']['warped_7'][:n_samples].clamp(0, 1), step)
+            self.writer.add_images('train/warped_from_I9',
+                                  outputs['warped']['warped_9'][:n_samples].clamp(0, 1), step)
 
         if 'coarse' in outputs:
-            coarse_up = F.interpolate(outputs['coarse'][:n_samples], 
+            coarse_up = F.interpolate(outputs['coarse'][:n_samples],
                                      size=pred.shape[2:], mode='bilinear')
             self.writer.add_images('train/coarse_frame', coarse_up.clamp(0, 1), step)
 
@@ -265,7 +263,7 @@ class TensorBoardLogger:
             plt.close(fig)
 
             self.writer.add_scalar('train/attention_max', alphas.max().item(), step)
-            self.writer.add_scalar('train/attention_entropy', 
+            self.writer.add_scalar('train/attention_entropy',
                                   -(alphas * torch.log(alphas + 1e-8)).sum(dim=-1).mean().item(), step)
 
     def _log_gradients(self, step: int, model: nn.Module):
@@ -302,12 +300,12 @@ class TensorBoardLogger:
         self.writer.add_histogram('histograms/prediction_values', pred, step)
 
         if 'flows' in outputs:
-            flow_31 = outputs['flows']['flow_31']
-            flow_mag = torch.sqrt(flow_31[:, 0]**2 + flow_31[:, 1]**2)
+            flow_7 = outputs['flows']['flow_7']
+            flow_mag = torch.sqrt(flow_7[:, 0]**2 + flow_7[:, 1]**2)
             self.writer.add_histogram('histograms/flow_magnitude', flow_mag, step)
 
         if 'attention_weights' in outputs:
-            self.writer.add_histogram('histograms/attention_weights', 
+            self.writer.add_histogram('histograms/attention_weights',
                                      outputs['attention_weights'], step)
 
     def log_validation(
@@ -354,35 +352,35 @@ class TensorBoardLogger:
         pred = outputs['prediction']
         n_samples = min(4, pred.shape[0])
 
-        self.writer.add_images('val/prediction', 
+        self.writer.add_images('val/prediction',
                               pred[:n_samples].clamp(0, 1), epoch)
-        self.writer.add_images('val/ground_truth', 
+        self.writer.add_images('val/ground_truth',
                               gt[:n_samples].clamp(0, 1), epoch)
 
         error_map = create_error_map(pred[:n_samples], gt[:n_samples])
         self.writer.add_images('val/error_map', error_map, epoch)
 
         if ref_frames is not None:
-            self.writer.add_images('val/ref_frame_I7', 
+            self.writer.add_images('val/ref_frame_I7',
                                   ref_frames[:n_samples, 0].clamp(0, 1), epoch)
-            self.writer.add_images('val/ref_frame_I9', 
+            self.writer.add_images('val/ref_frame_I9',
                                   ref_frames[:n_samples, 1].clamp(0, 1), epoch)
 
         if 'flows' in outputs:
-            flow_31_vis = flow_to_color(outputs['flows']['flow_31'][:n_samples])
-            flow_32_vis = flow_to_color(outputs['flows']['flow_32'][:n_samples])
-            self.writer.add_images('val/flow_I7_to_I8', flow_31_vis, epoch)
-            self.writer.add_images('val/flow_I9_to_I8', flow_32_vis, epoch)
+            flow_7_vis = flow_to_color(outputs['flows']['flow_7'][:n_samples])
+            flow_9_vis = flow_to_color(outputs['flows']['flow_9'][:n_samples])
+            self.writer.add_images('val/flow_I7_to_I8', flow_7_vis, epoch)
+            self.writer.add_images('val/flow_I9_to_I8', flow_9_vis, epoch)
 
         if 'occlusions' in outputs:
-            self.writer.add_images('val/occlusion_I7', 
-                                  outputs['occlusions']['occ_31'][:n_samples], epoch)
-            self.writer.add_images('val/occlusion_I9', 
-                                  outputs['occlusions']['occ_32'][:n_samples], epoch)
+            self.writer.add_images('val/occlusion_I7',
+                                  outputs['occlusions']['occ_7'][:n_samples], epoch)
+            self.writer.add_images('val/occlusion_I9',
+                                  outputs['occlusions']['occ_9'][:n_samples], epoch)
 
             fig = visualize_occlusion_maps(
-                outputs['occlusions']['occ_31'][:1],
-                outputs['occlusions']['occ_32'][:1]
+                outputs['occlusions']['occ_7'][:1],
+                outputs['occlusions']['occ_9'][:1]
             )
             self.writer.add_figure('val/occlusion_analysis', fig, epoch)
             plt.close(fig)
@@ -426,7 +424,7 @@ class TensorBoardLogger:
         self.writer.add_scalar('training/encoder_frozen', int(is_frozen), epoch)
 
         status = "FROZEN" if is_frozen else "TRAINABLE"
-        self.writer.add_text('training/encoder_status', 
+        self.writer.add_text('training/encoder_status',
                             f"Epoch {epoch}: Encoder is **{status}**", epoch)
 
     def close(self):
@@ -504,12 +502,12 @@ def train_epoch(model: LIFT, dataloader, optimizer, scheduler, loss_fn: LIFTLoss
             # Compute loss
             losses = loss_fn(
                 pred, gt,
-                flow1=outputs['flows']['flow_31'],
-                flow2=outputs['flows']['flow_32'],
-                logit_occ1=outputs['occlusions']['logit_occ_31'],
-                logit_occ2=outputs['occlusions']['logit_occ_32'],
-                warped1=outputs['warped']['warped_31'],
-                warped2=outputs['warped']['warped_32']
+                flow1=outputs['flows']['flow_7'],
+                flow2=outputs['flows']['flow_9'],
+                logit_occ1=outputs['occlusions']['logit_occ_7'],
+                logit_occ2=outputs['occlusions']['logit_occ_9'],
+                warped1=outputs['warped']['warped_7'],
+                warped2=outputs['warped']['warped_9']
             )
             loss = losses['total']
 

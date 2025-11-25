@@ -10,7 +10,7 @@ I've completed all remaining stages (3, 4, 5) and integrated everything into a f
 **File**: `model/ifnet.py`
 
 - Complete two-scale cascade (s8 -> s4)
-- Bi-directional flow prediction (flow_31, flow_32)
+- Bi-directional flow prediction (flow_7, flow_9)
 - Occlusion maps in logit space for stable training
 - Context injection from 15-frame transformer
 - Residual refinement between scales
@@ -167,22 +167,22 @@ python inference.py \
 Input: 15 frames [B, 15, 3, H, W]
   ↓
 Stage 1: Feature Encoder
-  → feats_s16 [B, 15, 256, H/16, W/16] for all frames
-  → feats_s4, feats_s8 [B, 2, C, H/x, W/x] for ref frames only
+  -> feats_s16 [B, 15, 256, H/16, W/16] for all frames
+  -> feats_s4, feats_s8 [B, 2, C, H/x, W/x] for ref frames only
   ↓
 Stage 2: Temporal Transformer
-  → context [B, 256, H/16, W/16] (aggregated 15-frame context)
-  → attention_weights [B, 15] (which frames are important)
+  -> context [B, 256, H/16, W/16] (aggregated 15-frame context)
+  -> attention_weights [B, 15] (which frames are important)
   ↓
 Stage 3: Flow Estimation (two-scale cascade)
-  → flow_31, flow_32 [B, 2, H/4, W/4] (bi-directional flows)
-  → occ_31, occ_32 [B, 1, H/4, W/4] (occlusion maps)
+  -> flow_7, flow_9 [B, 2, H/4, W/4] (bi-directional flows)
+  -> occ_7, occ_9 [B, 1, H/4, W/4] (occlusion maps)
   ↓
 Stage 4: Coarse Synthesis
-  → coarse_frame [B, 3, H/4, W/4] (warped + blended + context)
+  -> coarse_frame [B, 3, H/4, W/4] (warped + blended + context)
   ↓
 Stage 5: Full Resolution Refinement
-  → final_frame [B, 3, H, W] (high-quality interpolation)
+  -> final_frame [B, 3, H, W] (high-quality interpolation)
 ```
 
 ## Memory Usage (Validated)

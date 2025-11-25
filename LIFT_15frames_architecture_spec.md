@@ -1,9 +1,9 @@
 # LIFT-15: Long-range Interpolation with Far Temporal context
 ## Specyfikacja Architektury (15 klatek)
 
-**Wersja:** 2.1  
-**Data:** 2025-01  
-**Autor:** [Twoje dane]  
+**Wersja:** 2.1
+**Data:** 2025-01
+**Autor:** [Twoje dane]
 **Cel:** Master Thesis - Video Frame Interpolation z rozszerzonym kontekstem czasowym
 
 ---
@@ -62,21 +62,21 @@ Wydobycie wieloskalowych map cech z każdej z 14 klatek wejściowych przy użyci
 Input: Iₖ ∈ ℝ^(B×3×H×W)
 
 Encoder (współdzielony, bazowany na RIFE):
-├── Conv2d(3 → 32, k=3, s=1, p=1) + LeakyReLU
-├── Conv2d(32 → 32, k=3, s=1, p=1) + LeakyReLU
-├── ─────────────────────────────────────────── → Fₖˢ¹ ∈ ℝ^(B×32×H×W)        [TYLKO I₇, I₉]
-├── Conv2d(32 → 64, k=3, s=2, p=1) + LeakyReLU
-├── Conv2d(64 → 64, k=3, s=1, p=1) + LeakyReLU
-├── ─────────────────────────────────────────── → Fₖˢ⁴ ∈ ℝ^(B×128×H/4×W/4)   [TYLKO I₇, I₉]
-├── Conv2d(64 → 128, k=3, s=2, p=1) + LeakyReLU
-├── Conv2d(128 → 128, k=3, s=1, p=1) + LeakyReLU
-├── ─────────────────────────────────────────── → Fₖˢ⁸ ∈ ℝ^(B×192×H/8×W/8)   [TYLKO I₇, I₉]
-├── Conv2d(128 → 192, k=3, s=2, p=1) + LeakyReLU
-├── Conv2d(192 → 192, k=3, s=1, p=1) + LeakyReLU
-└── Conv2d(192 → 256, k=3, s=2, p=1) + LeakyReLU → Fₖˢ¹⁶ ∈ ℝ^(B×256×H/16×W/16) [WSZYSTKIE]
+├── Conv2d(3 -> 32, k=3, s=1, p=1) + LeakyReLU
+├── Conv2d(32 -> 32, k=3, s=1, p=1) + LeakyReLU
+├── ─────────────────────────────────────────── -> Fₖˢ¹ ∈ ℝ^(B×32×H×W)        [TYLKO I₇, I₉]
+├── Conv2d(32 -> 64, k=3, s=2, p=1) + LeakyReLU
+├── Conv2d(64 -> 64, k=3, s=1, p=1) + LeakyReLU
+├── ─────────────────────────────────────────── -> Fₖˢ⁴ ∈ ℝ^(B×128×H/4×W/4)   [TYLKO I₇, I₉]
+├── Conv2d(64 -> 128, k=3, s=2, p=1) + LeakyReLU
+├── Conv2d(128 -> 128, k=3, s=1, p=1) + LeakyReLU
+├── ─────────────────────────────────────────── -> Fₖˢ⁸ ∈ ℝ^(B×192×H/8×W/8)   [TYLKO I₇, I₉]
+├── Conv2d(128 -> 192, k=3, s=2, p=1) + LeakyReLU
+├── Conv2d(192 -> 192, k=3, s=1, p=1) + LeakyReLU
+└── Conv2d(192 -> 256, k=3, s=2, p=1) + LeakyReLU -> Fₖˢ¹⁶ ∈ ℝ^(B×256×H/16×W/16) [WSZYSTKIE]
 ```
 
-**Uwaga:** Wczesne warstwy (przed s4) mają mniej kanałów (32→64) niż w oryginalnej wersji, aby zoptymalizować pamięć przy zachowaniu cech s1.
+**Uwaga:** Wczesne warstwy (przed s4) mają mniej kanałów (32->64) niż w oryginalnej wersji, aby zoptymalizować pamięć przy zachowaniu cech s1.
 
 ### 2.3 Wymiary tensorów
 
@@ -94,7 +94,7 @@ def sinusoidal_pe(k, C, max_len=15):
     """
     k: indeks klatki (0-14, z pominięciem 8 podczas treningu)
     C: liczba kanałów (32/128/192/256)
-    
+
     Zachowujemy ORYGINALNE indeksy - model "wie" o brakującej klatce 8
     """
     pe = zeros(C)
@@ -129,7 +129,7 @@ Epoki 1-10:  Encoder ZAMROŻONY (wykorzystanie pretrenowanych wag RIFE)
 Epoki 11+:  Stopniowe odmrażanie z niskim LR (lr_encoder = 0.1 × lr_base)
 ```
 
-**Uwaga:** Warstwy s1 (3→32→32) są NOWE i nie mają pretrenowanych wag - należy je trenować od początku lub zainicjalizować z wag RIFE po dostosowaniu wymiarów.
+**Uwaga:** Warstwy s1 (3->32->32) są NOWE i nie mają pretrenowanych wag - należy je trenować od początku lub zainicjalizować z wag RIFE po dostosowaniu wymiarów.
 
 ### 2.7 Optymalizacja pamięci
 
@@ -139,7 +139,7 @@ Cechy s1 są przechowywane TYLKO dla I₇ i I₉:
 for k, frame in enumerate(input_frames):
     f_s16 = encoder_full(frame)  # Zawsze do s16
     features_s16.append(f_s16)
-    
+
     if k in [7, 9]:  # Tylko klatki referencyjne
         f_s1 = encoder.get_s1_features(frame)
         f_s4 = encoder.get_s4_features(frame)
@@ -166,8 +166,8 @@ Modelowanie zależności czasowych między 14 klatkami i agregacja do pojedyncze
 ### 3.2 Kluczowa zmiana vs 64-klatkowa wersja
 
 ```
-64 klatki: Okienkowa uwaga (W=8) → O(T·W²) = O(64·64) = 4096 operacji
-15 klatek: PEŁNA UWAGA możliwa → O(T²) = O(14²) = 196 operacji
+64 klatki: Okienkowa uwaga (W=8) -> O(T·W²) = O(64·64) = 4096 operacji
+15 klatek: PEŁNA UWAGA możliwa -> O(T²) = O(14²) = 196 operacji
 
 Redukcja: ~20× mniej operacji! Można użyć pełnej uwagi bez okien.
 ```
@@ -181,7 +181,7 @@ Redukcja: ~20× mniej operacji! Można użyć pełnej uwagi bez okien.
 | Liczba głów h | 8 | Standard dla D=256 |
 | Uwaga czasowa | **PEŁNA** | T=14 pozwala na pełną uwagę |
 | Rozmiar patcha P | 2×2 | Tokenizacja przestrzenna |
-| FFN expansion | 4× | D → 4D → D |
+| FFN expansion | 4× | D -> 4D -> D |
 | Dropout | 0.1 | Regularyzacja |
 
 ### 3.4 Tokenizacja przestrzenna
@@ -193,7 +193,7 @@ Dla H=W=256:
     Spatial size @ s16: 16×16
     Patch size: 2×2
     Tokens per frame: (16/2)×(16/2) = 64
-    
+
 Output po patchify:
     tokens ∈ ℝ^(B×14×64×256)  czyli (B, T, L, D)
     gdzie T=14 (klatki), L=64 (patche przestrzenne), D=256 (wymiar)
@@ -206,22 +206,22 @@ Dla każdej z L=3 warstw:
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ 1. TEMPORAL SELF-ATTENTION (pełna, nie okienkowa!)             │
-│    ├── Input: (B, T, L, D) → reshape → (B×L, T, D)             │
+│    ├── Input: (B, T, L, D) -> reshape -> (B×L, T, D)             │
 │    ├── MultiHeadAttention(D, heads=8)                          │
 │    ├── Każdy patch "widzi" wszystkie 14 klatek                 │
-│    └── Output: (B×L, T, D) → reshape → (B, T, L, D)            │
+│    └── Output: (B×L, T, D) -> reshape -> (B, T, L, D)            │
 ├─────────────────────────────────────────────────────────────────┤
 │ 2. SPATIAL PROCESSING (DepthwiseSeparable Conv)                │
-│    ├── Reshape: (B, T, L, D) → (B×T, D, 8, 8)                  │
+│    ├── Reshape: (B, T, L, D) -> (B×T, D, 8, 8)                  │
 │    ├── DepthwiseConv2d(D, D, k=3, groups=D)                    │
 │    ├── PointwiseConv2d(D, D, k=1)                              │
 │    ├── GroupNorm(8 groups) + residual                          │
-│    └── Reshape back: (B×T, D, 8, 8) → (B, T, L, D)             │
+│    └── Reshape back: (B×T, D, 8, 8) -> (B, T, L, D)             │
 ├─────────────────────────────────────────────────────────────────┤
 │ 3. FEED-FORWARD NETWORK                                        │
 │    ├── LayerNorm                                               │
-│    ├── Linear(D → 4D) + GELU                                   │
-│    ├── Linear(4D → D)                                          │
+│    ├── Linear(D -> 4D) + GELU                                   │
+│    ├── Linear(4D -> D)                                          │
 │    ├── Dropout(0.1)                                            │
 │    └── Residual connection                                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -240,7 +240,7 @@ Agregacja do pojedynczego kontekstu:
 
 2. Importance scoring (MLP):
    αₖ_raw = MLP([g₀, g₁, ..., g₇, g₉, ..., g₁₄])
-   MLP: D → D/4 → 1 (per klatka)
+   MLP: D -> D/4 -> 1 (per klatka)
 
 3. Softmax normalization:
    αₖ = softmax(α_raw)    gdzie Σαₖ = 1
@@ -319,9 +319,9 @@ input_s8 = concat([F₇ˢ⁸, F₉ˢ⁸, F_ctxˢ⁸, t_chan])
 
 **Sieć IFNet-like:**
 ```
-Conv(641 → 256, k=3) + LeakyReLU
+Conv(641 -> 256, k=3) + LeakyReLU
 ResBlock(256) × 3
-Conv(256 → 6, k=3)  # 2+2+1+1 = 6 kanałów wyjściowych
+Conv(256 -> 6, k=3)  # 2+2+1+1 = 6 kanałów wyjściowych
 
 Output:
 ├── flow₇ˢ⁸ ∈ ℝ^(B×2×H/8×W/8)      - przepływ do I₇
@@ -347,7 +347,7 @@ F₉ˢ⁴ ∈ ℝ^(B×128×H/4×W/4)
 F_ctxˢ⁴ = bilinear_upsample(F_ctx, scale=4) ∈ ℝ^(B×256×H/4×W/4)
 t_chan_s4 = 0.5 · 𝟙 ∈ ℝ^(B×1×H/4×W/4)
 
-refine_input = concat([F₇ˢ⁴, F₉ˢ⁴, F_ctxˢ⁴, 
+refine_input = concat([F₇ˢ⁴, F₉ˢ⁴, F_ctxˢ⁴,
                        flow₇_up, flow₉_up,
                        logit_O₇_up, logit_O₉_up,
                        t_chan_s4])
@@ -356,9 +356,9 @@ refine_input = concat([F₇ˢ⁴, F₉ˢ⁴, F_ctxˢ⁴,
 
 **Sieć refinująca:**
 ```
-Conv(519 → 128, k=3) + LeakyReLU
+Conv(519 -> 128, k=3) + LeakyReLU
 ResBlock(128) × 2
-Conv(128 → 6, k=3)  # delta dla flow i logit
+Conv(128 -> 6, k=3)  # delta dla flow i logit
 
 Output (residualne!):
 ├── Δflow₇ ∈ ℝ^(B×2×H/4×W/4)
@@ -380,8 +380,8 @@ O₉ˢ⁴ = σ(logit_O₉ˢ⁴) ∈ [0,1]^(B×1×H/4×W/4)
 ### 4.5 Wyjście STAGE 3
 
 ```
-flow₇ˢ⁴ ∈ ℝ^(B×2×H/4×W/4)      - przepływ optyczny I₈→I₇
-flow₉ˢ⁴ ∈ ℝ^(B×2×H/4×W/4)      - przepływ optyczny I₈→I₉
+flow₇ˢ⁴ ∈ ℝ^(B×2×H/4×W/4)      - przepływ optyczny I₈->I₇
+flow₉ˢ⁴ ∈ ℝ^(B×2×H/4×W/4)      - przepływ optyczny I₈->I₉
 O₇ˢ⁴ ∈ [0,1]^(B×1×H/4×W/4)     - mapa okluzji dla I₇
 O₉ˢ⁴ ∈ [0,1]^(B×1×H/4×W/4)     - mapa okluzji dla I₉
 ```
@@ -425,9 +425,9 @@ I₈_blend = (O₇ˢ⁴ * I₈_from_7 + O₉ˢ⁴ * I₈_from_9) / (O₇ˢ⁴ + 
 ```
 
 **Interpretacja:**
-- Wysoka O₇ → region dobrze widoczny w I₇ → więcej wagi z I₇
-- Wysoka O₉ → region dobrze widoczny w I₉ → więcej wagi z I₉
-- Obie niskie → okluzja w obu → średnia (lub potrzebny inpainting)
+- Wysoka O₇ -> region dobrze widoczny w I₇ -> więcej wagi z I₇
+- Wysoka O₉ -> region dobrze widoczny w I₉ -> więcej wagi z I₉
+- Obie niskie -> okluzja w obu -> średnia (lub potrzebny inpainting)
 
 ### 5.4 Context Injection (ContextNet)
 
@@ -439,8 +439,8 @@ Input:
 ctx_input = concat([I₈_blend, F_ctxˢ⁴]) ∈ ℝ^(B×259×H/4×W/4)
 
 ContextNet (bardzo lekka!):
-├── Conv(259 → 64, k=3, p=1) + ReLU
-└── Conv(64 → 3, k=3, p=1)           # residual w przestrzeni obrazu
+├── Conv(259 -> 64, k=3, p=1) + ReLU
+└── Conv(64 -> 3, k=3, p=1)           # residual w przestrzeni obrazu
 
 Output:
 residual ∈ ℝ^(B×3×H/4×W/4)
@@ -491,11 +491,11 @@ F₉ˢ¹ ∈ ℝ^(B×32×H×W)  # bezpośrednio z STAGE 1
 **Porównanie z poprzednią wersją:**
 ```
 STARA WERSJA (bez s1):
-F₇ˢ⁴ ∈ ℝ^(B×128×H/4×W/4) → Conv1x1 → ℝ^(B×32×H/4×W/4) → upsample ×4 → ℝ^(B×32×H×W)
+F₇ˢ⁴ ∈ ℝ^(B×128×H/4×W/4) -> Conv1x1 -> ℝ^(B×32×H/4×W/4) -> upsample ×4 -> ℝ^(B×32×H×W)
                                       ↑ utrata informacji przez upsample!
 
 NOWA WERSJA (z s1):
-F₇ˢ¹ ∈ ℝ^(B×32×H×W) → bezpośrednio do refinera
+F₇ˢ¹ ∈ ℝ^(B×32×H×W) -> bezpośrednio do refinera
                       ↑ pełne detale, zero utraty!
 ```
 
@@ -508,11 +508,11 @@ refine_input = concat([I₈_up, F₇ˢ¹, F₉ˢ¹]) ∈ ℝ^(B×67×H×W)
                        3     32    32  = 67 kanałów
 
 RefineNet:
-├── Conv(67 → 64, k=3, p=1) + GroupNorm(8) + ReLU
-├── ResBlock(64 → 64) × 2
-│   └── Conv(64→64, k=3) + GN + ReLU + Conv(64→64, k=3) + GN + residual
-├── Conv(64 → 32, k=3, p=1) + GroupNorm(4) + ReLU
-└── Conv(32 → 3, k=3, p=1)  # bez aktywacji - residual
+├── Conv(67 -> 64, k=3, p=1) + GroupNorm(8) + ReLU
+├── ResBlock(64 -> 64) × 2
+│   └── Conv(64->64, k=3) + GN + ReLU + Conv(64->64, k=3) + GN + residual
+├── Conv(64 -> 32, k=3, p=1) + GroupNorm(4) + ReLU
+└── Conv(32 -> 3, k=3, p=1)  # bez aktywacji - residual
 
 Output:
 residual ∈ ℝ^(B×3×H×W)
@@ -531,9 +531,9 @@ Clamp do [0, 1] przed zapisem/wizualizacją!
 
 | Aspekt | Bez s1 (stara wersja) | Z s1 (nowa wersja) |
 |--------|----------------------|-------------------|
-| Rozdzielczość cech | H/4 × W/4 → upsample | H × W (natywna) |
+| Rozdzielczość cech | H/4 × W/4 -> upsample | H × W (natywna) |
 | Utrata detali | Tak (przez upsample) | Nie |
-| Kanały | 128 → 32 (redukcja) | 32 (od razu) |
+| Kanały | 128 -> 32 (redukcja) | 32 (od razu) |
 | Pamięć | Mniej | +~16MB (akceptowalne) |
 | Jakość krawędzi | Rozmyte | **Ostre** |
 
@@ -613,41 +613,41 @@ def forward(input_frames, t=0.5):
     # STAGE 1 - ekstrakcja cech
     features_s16 = []
     ref_features = {}
-    
+
     for k, frame in enumerate(input_frames):
         f_s16 = encoder.forward_s16(frame)
         features_s16.append(f_s16)
-        
+
         if k in [7, 9]:  # Klatki referencyjne
             ref_features[k] = {
                 's1': encoder.get_s1(frame),   # ← NOWE! Pełna rozdzielczość
                 's4': encoder.get_s4(frame),
                 's8': encoder.get_s8(frame),
             }
-    
+
     # STAGE 2 - agregacja czasowa
     F_ctx, alphas = temporal_transformer(torch.stack(features_s16, dim=1))
-    
+
     # STAGE 3 - szacowanie przepływu
     flows, occlusions = flow_estimator(
         ref_features[7]['s8'], ref_features[9]['s8'],
         ref_features[7]['s4'], ref_features[9]['s4'],
         F_ctx, t
     )
-    
+
     # STAGE 4 - synteza zgrubna
     I_coarse = coarse_synthesis(
         input_frames[7], input_frames[9],  # I₇, I₉
         flows, occlusions, F_ctx
     )
-    
+
     # STAGE 5 - refinement z cechami s1
     I_final = full_res_refiner(
         I_coarse,
         ref_features[7]['s1'],  # ← NOWE! Cechy pełnej rozdzielczości
         ref_features[9]['s1']   # ← NOWE!
     )
-    
+
     return I_final, alphas, flows, occlusions
 ```
 
@@ -659,11 +659,11 @@ def forward(input_frames, t=0.5):
 | 2 | 11-30 | Wszystko | 1e-4 (encoder: 1e-5) | Stopniowe odmrażanie |
 | 3 | 31-50 | Wszystko | 1e-5 | Fine-tuning |
 
-**Uwaga:** Warstwy s1 (3→32→32) są nowe i mogą wymagać wyższego LR na początku.
+**Uwaga:** Warstwy s1 (3->32->32) są nowe i mogą wymagać wyższego LR na początku.
 
 ### 8.4 TODO implementacyjne
 
-- [ ] Dataloader dla 15-klatkowych klipów (Vimeo90K septuplet → rozszerzyć?)
+- [ ] Dataloader dla 15-klatkowych klipów (Vimeo90K septuplet -> rozszerzyć?)
 - [ ] Augmentacje z temporal awareness
 - [ ] Training loop z gradient accumulation (jeśli batch nie mieści się)
 - [ ] Checkpointing co N epok
@@ -820,8 +820,8 @@ INPUT: [I₀, I₁, ..., I₇, I₉, ..., I₁₄]  (14 klatek)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ STAGE 1: Feature Extraction                                        │
 │                                                                     │
-│   Wszystkie 14 klatek → s16 features                               │
-│   Tylko I₇, I₉ → s1, s4, s8 features                               │
+│   Wszystkie 14 klatek -> s16 features                               │
+│   Tylko I₇, I₉ -> s1, s4, s8 features                               │
 │                                                                     │
 │   Output:                                                           │
 │   ├── F_temporal: [B, 14, 256, H/16, W/16]                         │
@@ -834,7 +834,7 @@ INPUT: [I₀, I₁, ..., I₇, I₉, ..., I₁₄]  (14 klatek)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ STAGE 2: Temporal Transformer                                       │
 │                                                                     │
-│   F_temporal → Full Self-Attention (T=14) → Adaptive Aggregation   │
+│   F_temporal -> Full Self-Attention (T=14) -> Adaptive Aggregation   │
 │                                                                     │
 │   Output:                                                           │
 │   ├── F_ctx: [B, 256, H/16, W/16]                                  │
@@ -845,7 +845,7 @@ INPUT: [I₀, I₁, ..., I₇, I₉, ..., I₁₄]  (14 klatek)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ STAGE 3: Flow Estimation (2-scale cascade)                         │
 │                                                                     │
-│   [F₇ˢ⁸, F₉ˢ⁸, F_ctx] → s8 estimation → s4 refinement             │
+│   [F₇ˢ⁸, F₉ˢ⁸, F_ctx] -> s8 estimation -> s4 refinement             │
 │                                                                     │
 │   Output:                                                           │
 │   ├── flow₇ˢ⁴, flow₉ˢ⁴: [B, 2, H/4, W/4]                          │
@@ -856,7 +856,7 @@ INPUT: [I₀, I₁, ..., I₇, I₉, ..., I₁₄]  (14 klatek)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ STAGE 4: Coarse Synthesis                                           │
 │                                                                     │
-│   [I₇, I₉, flows, occlusions, F_ctx] → warp + blend + context      │
+│   [I₇, I₉, flows, occlusions, F_ctx] -> warp + blend + context      │
 │                                                                     │
 │   Output:                                                           │
 │   └── I₈_coarse: [B, 3, H/4, W/4]                                  │
@@ -866,7 +866,7 @@ INPUT: [I₀, I₁, ..., I₇, I₉, ..., I₁₄]  (14 klatek)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ STAGE 5: Full-Resolution Refinement                                 │
 │                                                                     │
-│   [I₈_coarse↑, F₇ˢ¹, F₉ˢ¹] → RefineNet → residual                  │
+│   [I₈_coarse↑, F₇ˢ¹, F₉ˢ¹] -> RefineNet -> residual                  │
 │                    ↑                                                │
 │          FULL-RES FEATURES (no upsampling loss!)                   │
 │                                                                     │
@@ -876,7 +876,7 @@ INPUT: [I₀, I₁, ..., I₇, I₉, ..., I₁₄]  (14 klatek)
                     │
                     ▼
               OUTPUT: Î₈
-              
+
               Loss = L1(Î₈, I₈_GT) + λ·LPIPS(Î₈, I₈_GT)
 ```
 

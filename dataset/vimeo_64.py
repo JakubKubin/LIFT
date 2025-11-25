@@ -18,7 +18,7 @@ class Vimeo15Dataset(Dataset):
     2. Sequential reading: read frames one by one to avoid memory spikes
     3. Efficient augmentation: apply transforms during loading, not after
 
-    The model interpolates frame at t=0.5 between frame 31 and 32 (middle of sequence).
+    The model interpolates frame at t=0.5 between frame 7 and 32 (middle of sequence).
     """
 
     def __init__(self,
@@ -28,7 +28,7 @@ class Vimeo15Dataset(Dataset):
                  crop_size=(224, 224),
                  augment=True,
                  input_scale=1.0,
-                 max_sequences=None): # Added max_sequences
+                 max_sequences=None):
         """
         Args:
             data_root: Root directory containing video sequences
@@ -44,7 +44,7 @@ class Vimeo15Dataset(Dataset):
         self.crop_size = crop_size
         self.augment = augment and (mode == 'train')
         self.input_scale = input_scale
-        self.max_sequences = max_sequences # Store it
+        self.max_sequences = max_sequences
 
         # Reference frames
         mid = self.num_frames // 2
@@ -267,7 +267,7 @@ class VideoSequenceDataset(Dataset):
                  crop_size=(224, 224),
                  augment=True,
                  input_scale=1.0,
-                 max_sequences=None): # Added max_sequences
+                 max_sequences=None):
         """
         Args:
             video_list_file: Text file containing list of video paths

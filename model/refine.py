@@ -12,7 +12,10 @@ Memory optimization:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
 
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
 
 class ResBlock(nn.Module):
     """
@@ -69,7 +72,7 @@ class FullResolutionRefinement(nn.Module):
         super().__init__()
         self.config = config
 
-        # Input: 
+        # Input:
         # - Upsampled Coarse Frame (3 channels)
         # - Feature Ref 1 (s1, 32 channels)
         # - Feature Ref 2 (s1, 32 channels)
@@ -150,9 +153,6 @@ class FullResolutionRefinement(nn.Module):
 
 
 if __name__ == '__main__':
-    # Test full resolution refinement
-    import sys
-    sys.path.append('..')
     from configs.default import Config
 
     config = Config()
@@ -162,17 +162,16 @@ if __name__ == '__main__':
     B, H, W = 2, 256, 256
     # Coarse frame is at 1/4 resolution (s4)
     coarse_frame = torch.rand(B, 3, H // 4, W // 4).to(device)
-    # Reference features are also at 1/4 resolution (s4)
-    # Using config to get correct channel count
-    c_s4 = config.encoder_channels['s4']
-    ref_feats_s4 = torch.rand(B, 2, c_s4, H // 4, W // 4).to(device)
+
+    c_s1 = config.encoder_channels['s1']
+    ref_feats_s1 = torch.rand(B, 2, c_s1, H, W).to(device)
 
     # Create refinement module
     refinement = FullResolutionRefinement(config).to(device)
 
     # Forward pass
     with torch.no_grad():
-        output = refinement(coarse_frame, ref_feats_s4)
+        output = refinement(coarse_frame, ref_feats_s1)
 
     print("Full Resolution Refinement outputs:")
     for key, value in output.items():
@@ -199,8 +198,3 @@ if __name__ == '__main__':
     print(f"  Final mean: {output['final_frame'].mean():.4f}")
     print(f"  Residual mean: {output['residual'].mean():.4f}")
     print(f"  Residual std: {output['residual'].std():.4f}")
-
-    # Check memory usage
-    if torch.cuda.is_available():
-        print(f"\nGPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
-        print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")

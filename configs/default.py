@@ -14,7 +14,7 @@ class Config:
     input_scale = 1.0
 
     # Model architecture parameters
-    # Stage 1: Encoder
+    # Encoder
     encoder_scales = ['s1', 's4', 's8', 's16']  # Output scales
     encoder_channels = {
         's1': 32,
@@ -24,24 +24,24 @@ class Config:
     }
     freeze_encoder_epochs = 2  # Freeze encoder for first N epochs was 10
 
-    # Stage 2: Transformer
+    # Transformer
     transformer_layers = 3
     transformer_dim = 256
     transformer_heads = 8
     spatial_patch_size = 2
     transformer_dropout = 0.1
 
-    # Stage 3: Flow estimation
+    # Flow estimation
     flow_scales = [8, 4]  # Coarse to fine
     flow_channels = {
         8: 256,
         4: 128
     }
 
-    # Stage 4: Synthesis
+    # Synthesis
     context_net_channels = 64
 
-    # Stage 5: Refinement
+    # Refinement
     refine_channels = [64, 32]
     refine_reduce_channels = 32  # Reduce from 128 to this
 

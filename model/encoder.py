@@ -57,7 +57,7 @@ class FeatureEncoder(nn.Module):
     """
     Multi-scale feature encoder for single frame.
 
-    Extracts features at three scales: s4 (1/4), s8 (1/8), s16 (1/16).
+    Extracts features at four scales: s1 (1/1), s4 (1/4), s8 (1/8), s16 (1/16).
     Based on RIFE architecture but adapted for LIFT.
     """
 
@@ -70,14 +70,14 @@ class FeatureEncoder(nn.Module):
         c_s8 = config.encoder_channels['s8']    # 192
         c_s16 = config.encoder_channels['s16']  # 256
 
-        # --- SKALA S1 (Full Resolution) ---
+        # Full resolution input conv
         # Input: H, W -> Output: H, W (Stride 1)
         self.conv_s1 = nn.Sequential(
             conv_block(3, 32, 3, 1, 1),
             conv_block(32, c_s1, 3, 1, 1)
         )
 
-        # Przejście s1 -> s2 -> s4
+        # s1 -> s2 -> s4
         # Input: H, W -> Output: H/4, W/4
         self.conv_s1_to_s4 = nn.Sequential(
             conv_block(c_s1, 64, 3, 2, 1),      # Downsample to H/2
@@ -111,7 +111,7 @@ class FeatureEncoder(nn.Module):
             x: Input image [B, 3, H, W]
 
         Returns:
-            Dictionary with keys 's4', 's8', 's16' containing features
+            Dictionary with keys 's1', 's4', 's8', 's16' containing features
         """
         # Initial features (now H/2, W/2)
         feat_s1 = self.conv_s1(x)           # [B, 32, H, W]
@@ -193,15 +193,15 @@ class FrameEncoder(nn.Module):
     Memory optimization:
     - Processes frames one at a time (or in small batches)
     - Only keeps s16 features for all frames
-    - Only keeps s4, s8 features for reference frames (7, 9)
+    - Only keeps s1, s4, s8 features for reference frames (7, 9)
     """
 
     def __init__(self, config):
         super().__init__()
 
         self.config = config
-        self.num_frames = config.model_frames # 14 (frames to process)
-        self.total_frames = config.num_frames # 15 (total temporal positions)
+        self.num_frames = config.model_frames # 14 frames to process
+        self.total_frames = config.num_frames # 15 total temporal positions
 
         # Shared encoder for all frames
         self.encoder = FeatureEncoder(config)
@@ -232,6 +232,7 @@ class FrameEncoder(nn.Module):
         Returns:
             Dictionary with:
                 - 'feats_s16': Features at s16 for all frames [B, 15, C, H/16, W/16]
+                - 'ref_feats_s1': Features at s1 for ref frames [B, 2, C, H, W]
                 - 'ref_feats_s4': Features at s4 for ref frames [B, 2, C, H/4, W/4]
                 - 'ref_feats_s8': Features at s8 for ref frames [B, 2, C, H/8, W/8]
 
@@ -247,8 +248,8 @@ class FrameEncoder(nn.Module):
         ref_feats_s4 = []
         ref_feats_s8 = []
 
-        gap_idx = self.total_frames // 2  
-        has_gap = (T == self.num_frames) 
+        gap_idx = self.total_frames // 2
+        has_gap = (T == self.num_frames)
 
         for t in range(T):
             frame_t = frames[:, t]
@@ -264,12 +265,12 @@ class FrameEncoder(nn.Module):
             feat_s16 = self.pos_enc_s16(feats['s16'], real_t)
             feats_s16_list.append(feat_s16)
 
-            # s1, s4, s8 ONLY for Reference Frames (Memory Optimization)
+            # s1, s4, s8 only for Reference Frames (Memory Optimization)
             if t in self.ref_indices:
-                feat_s1 = self.pos_enc_s1(feats['s1'], real_t) # s1 + PE
+                feat_s1 = self.pos_enc_s1(feats['s1'], real_t)
                 feat_s4 = self.pos_enc_s4(feats['s4'], real_t)
                 feat_s8 = self.pos_enc_s8(feats['s8'], real_t)
-                
+
                 ref_feats_s1.append(feat_s1)
                 ref_feats_s4.append(feat_s4)
                 ref_feats_s8.append(feat_s8)
@@ -290,20 +291,22 @@ class FrameEncoder(nn.Module):
 
         return {
             'feats_s16': feats_s16,
-            'ref_feats_s1': ref_feats_s1, # Zwracamy s1
+            'ref_feats_s1': ref_feats_s1,
             'ref_feats_s4': ref_feats_s4,
             'ref_feats_s8': ref_feats_s8
         }
 
 
 if __name__ == '__main__':
-    # Test encoder
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
     from configs.default import Config
 
     config = Config()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Create test input dynamically
+    # Create test input
     num_test = 14
     frames = torch.rand(2, num_test, 3, 256, 256).to(device)
     encoder = FrameEncoder(config).to(device)
@@ -315,8 +318,3 @@ if __name__ == '__main__':
     print("Encoder output shapes:")
     for key, value in output.items():
         print(f"  {key}: {value.shape}")
-
-    # Check memory usage
-    if torch.cuda.is_available():
-        print(f"\nGPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
-        print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")

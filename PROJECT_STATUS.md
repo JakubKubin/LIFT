@@ -33,7 +33,7 @@ All core components of the LIFT model have been implemented and are ready for tr
 **Components**:
 - `FlowEstimationBlock`: Single-scale flow and occlusion prediction
 - `FlowEstimator`: Two-scale cascade (s8 -> s4)
-- Predicts bi-directional flows (flow_31, flow_32)
+- Predicts bi-directional flows (flow_7, flow_9)
 - Predicts occlusion maps in logit space
 - Context injection from transformer
 - Residual refinement between scales

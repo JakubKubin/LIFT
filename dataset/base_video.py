@@ -115,7 +115,7 @@ class VideoFrameExtractor:
         total_frames = info['total_frames']
 
         if total_frames < num_frames:
-            # If video is too short, only one sequence possible (with padding)
+            # If video is too short, only one sequence possible with padding
             return [0]
 
         # All possible starting positions
@@ -159,20 +159,18 @@ class BaseVideoDataset(Dataset):
         self.mid_idx = num_frames // 2
 
         if self.is_odd:
-            # For 15 frames: mid=7. Refs=6,8. GT=7.
             self.ref_source_idx = [self.mid_idx - 1, self.mid_idx + 1]
         else:
-            # For 64 frames: mid=32. Refs=31,32. GT=interpolated.
             self.ref_source_idx = [self.mid_idx - 1, self.mid_idx]
         self.target_timestep = 0.5
 
-        # Frame cache (if enabled)
+        # Frame cache
         self._frame_cache = {} if cache_frames else None
 
         # To be filled by subclasses
         self.video_list = []
 
-        # Extractor utility
+        # Extractor
         self.extractor = VideoFrameExtractor()
 
     def __len__(self):
@@ -200,7 +198,7 @@ class BaseVideoDataset(Dataset):
             video_path,
             start_frame=start_frame,
             num_frames=self.num_frames,
-            target_size=None  # Don't resize yet, do it after augmentation
+            target_size=None  # Do not resize
         )
 
         # Resize if scale is not 1.0
@@ -231,7 +229,7 @@ class BaseVideoDataset(Dataset):
             y = np.random.randint(0, w - crop_w + 1)
             frames = [f[x:x+crop_h, y:y+crop_w] for f in frames]
         elif h != crop_h or w != crop_w:
-            # Resize if dimensions don't match
+            # Resize if dimensions do not match
             frames = [cv2.resize(f, (crop_w, crop_h)) for f in frames]
 
         # Random horizontal flip
@@ -256,7 +254,7 @@ class BaseVideoDataset(Dataset):
         if rotate_code is not None:
             frames = [cv2.rotate(f, rotate_code) for f in frames]
 
-        # Random temporal flip (reverse sequence)
+        # Random temporal flip
         if random.random() < 0.5:
             frames = frames[::-1]
 

@@ -143,7 +143,7 @@ def plot_attention_weights(
 
     fig, ax = plt.subplots(figsize=(12, 4))
 
-    colors = ['#2ecc71' if i in [gap_idx-1, gap_idx+1] else '#3498db' 
+    colors = ['#2ecc71' if i in [gap_idx-1, gap_idx+1] else '#3498db'
               for i in x_labels]
 
     bars = ax.bar(range(len(weights_np)), weights_np, color=colors, edgecolor='black', linewidth=0.5)
@@ -154,12 +154,12 @@ def plot_attention_weights(
     ax.set_ylabel('Attention Weight (α)', fontsize=12)
     ax.set_title(title, fontsize=14, fontweight='bold')
 
-    ax.axhline(y=1.0/len(weights_np), color='red', linestyle='--', 
+    ax.axhline(y=1.0/len(weights_np), color='red', linestyle='--',
                label=f'Uniform: {1.0/len(weights_np):.3f}', alpha=0.7)
 
     max_idx = np.argmax(weights_np)
     # Cast to python primitives for matplotlib compatibility
-    ax.annotate(f'{weights_np[max_idx]:.3f}', 
+    ax.annotate(f'{weights_np[max_idx]:.3f}',
                 xy=(float(max_idx), float(weights_np[max_idx])),
                 xytext=(float(max_idx), float(weights_np[max_idx]) + 0.02),
                 ha='center', fontsize=10, fontweight='bold')
@@ -187,7 +187,7 @@ def plot_loss_components(
     Returns:
         Matplotlib figure
     """
-    filtered = {k: v for k, v in losses.items() 
+    filtered = {k: v for k, v in losses.items()
                 if k != 'total' and v > 0}
 
     if not filtered:
@@ -245,7 +245,7 @@ def plot_flow_histogram(
 
     ax.hist(mag_np, bins=50, color='#3498db', edgecolor='black', alpha=0.7)
     # Cast to python float
-    ax.axvline(float(mag_np.mean()), color='red', linestyle='--', 
+    ax.axvline(float(mag_np.mean()), color='red', linestyle='--',
                label=f'Mean: {mag_np.mean():.2f}')
     ax.axvline(float(np.median(mag_np)), color='green', linestyle='--',
                label=f'Median: {np.median(mag_np):.2f}')
@@ -328,12 +328,12 @@ def visualize_occlusion_maps(
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     im1 = axes[0].imshow(occ1_np, cmap='hot', vmin=0, vmax=1)
-    axes[0].set_title('Occlusion I₇→I₈', fontsize=11)
+    axes[0].set_title('Occlusion I₇->I₈', fontsize=11)
     axes[0].axis('off')
     plt.colorbar(im1, ax=axes[0], fraction=0.046)
 
     im2 = axes[1].imshow(occ2_np, cmap='hot', vmin=0, vmax=1)
-    axes[1].set_title('Occlusion I₉→I₈', fontsize=11)
+    axes[1].set_title('Occlusion I₉->I₈', fontsize=11)
     axes[1].axis('off')
     plt.colorbar(im2, ax=axes[1], fraction=0.046)
 
@@ -427,13 +427,13 @@ if __name__ == '__main__':
 
     weights = torch.softmax(torch.randn(14), dim=0)
     fig = plot_attention_weights(weights)
-    plt.savefig('/tmp/test_attention.png')
+    plt.savefig('test_attention.png')
     plt.close(fig)
     print("Attention plot saved")
 
     losses = {'l1': 0.05, 'lap': 0.02, 'lpips': 0.01, 'flow_smooth': 0.005}
     fig = plot_loss_components(losses)
-    plt.savefig('/tmp/test_losses.png')
+    plt.savefig('test_losses.png')
     plt.close(fig)
     print("Loss plot saved")
 

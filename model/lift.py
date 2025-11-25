@@ -117,6 +117,7 @@ class LIFT(nn.Module):
             ref_frames,
             ref_feats_s8,
             ref_feats_s4,
+            ref_feats_s1,
             context,
             timestep
         )
@@ -134,18 +135,18 @@ class LIFT(nn.Module):
             'prediction': final_frame,
             'coarse': coarse_frame,
             'flows': {
-                'flow_31': flow_output['flow_31'],
-                'flow_32': flow_output['flow_32'],
+                'flow_7': flow_output['flow_7'],
+                'flow_9': flow_output['flow_9'],
             },
             'occlusions': {
-                'occ_31': flow_output['occ_31'],
-                'occ_32': flow_output['occ_32'],
-                'logit_occ_31': flow_output['logit_occ_31'],
-                'logit_occ_32': flow_output['logit_occ_32'],
+                'occ_7': flow_output['occ_7'],
+                'occ_9': flow_output['occ_9'],
+                'logit_occ_7': flow_output['logit_occ_7'],
+                'logit_occ_9': flow_output['logit_occ_9'],
             },
             'warped': {
-                'warped_31': synthesis_output['warped_31'],
-                'warped_32': synthesis_output['warped_32'],
+                'warped_7': synthesis_output['warped_7'],
+                'warped_9': synthesis_output['warped_9'],
             },
             'attention_weights': attention_weights,
         }
@@ -264,10 +265,10 @@ if __name__ == '__main__':
     print("\nOutput shapes:")
     print(f"  Prediction: {output['prediction'].shape}")
     print(f"  Coarse: {output['coarse'].shape}")
-    print(f"  Flow 31: {output['flows']['flow_31'].shape}")
-    print(f"  Flow 32: {output['flows']['flow_32'].shape}")
-    print(f"  Occlusion 31: {output['occlusions']['occ_31'].shape}")
-    print(f"  Occlusion 32: {output['occlusions']['occ_32'].shape}")
+    print(f"  Flow 31: {output['flows']['flow_7'].shape}")
+    print(f"  Flow 32: {output['flows']['flow_9'].shape}")
+    print(f"  Occlusion 31: {output['occlusions']['occ_7'].shape}")
+    print(f"  Occlusion 32: {output['occlusions']['occ_9'].shape}")
     print(f"  Attention weights: {output['attention_weights'].shape}")
 
     # Verify outputs
