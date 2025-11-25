@@ -67,28 +67,19 @@ class FullResolutionRefinement(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-
         self.config = config
 
-        # Channel reduction for memory efficiency
-        # Input: 128 channels -> Output: 32 channels
-        self.reduce_feat_7 = nn.Conv2d(
-            config.encoder_channels['s4'],
-            config.refine_reduce_channels,
-            kernel_size=1,
-            bias=False
-        )
-        self.reduce_feat_9 = nn.Conv2d(
-            config.encoder_channels['s4'],
-            config.refine_reduce_channels,
-            kernel_size=1,
-            bias=False
-        )
+        # Input: 
+        # - Upsampled Coarse Frame (3 channels)
+        # - Feature Ref 1 (s1, 32 channels)
+        # - Feature Ref 2 (s1, 32 channels)
+        # Total = 3 + 32 + 32 = 67
 
-        # Refinement network
-        # Input: 3 (RGB) + 32 (feat_7) + 32 (feat_9) = 67 channels
-        input_channels = 3 + config.refine_reduce_channels * 2
-        hidden_channels = config.refine_channels[0]  # 15
+        # Usuwamy warstwy redukcji kanałów, bo s1 ma już 32 kanały
+        s1_channels = config.encoder_channels['s1'] # 32
+        input_channels = 3 + s1_channels * 2
+
+        hidden_channels = config.refine_channels[0]  # 64
 
         # Initial convolution
         self.conv_init = nn.Sequential(
@@ -110,22 +101,16 @@ class FullResolutionRefinement(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        # Output layer (no activation - this is a residual)
+        # Output layer (residual)
         self.conv_out = nn.Conv2d(config.refine_channels[1], 3, kernel_size=3, padding=1, bias=True)
 
-    def forward(self, coarse_frame, ref_feats_s4):
+    def forward(self, coarse_frame, ref_feats_s1):
         """
-        Refine coarse frame to full resolution.
+        Refine coarse frame using full resolution s1 features.
 
         Args:
-            coarse_frame: Coarse interpolated frame [B, 3, H/4, W/4]
-            ref_feats_s4: Reference frame features at s4 [B, 2, 128, H/4, W/4]
-
-        Returns:
-            Dictionary with:
-                - 'final_frame': Final high-quality interpolated frame [B, 3, H, W]
-                - 'upsampled_coarse': Upsampled coarse frame [B, 3, H, W]
-                - 'residual': Residual correction [B, 3, H, W]
+            coarse_frame: [B, 3, H/4, W/4]
+            ref_feats_s1: [B, 2, 32, H, W] (Already Full Res)
         """
         B, _, H_s4, W_s4 = coarse_frame.shape
 
@@ -139,43 +124,22 @@ class FullResolutionRefinement(nn.Module):
             align_corners=False
         )
 
-        # Step 5.2: Reduce channels of reference features
-        # Extract individual reference frame features
-        feat_7_s4 = ref_feats_s4[:, 0]  # [B, 128, H/4, W/4]
-        feat_9_s4 = ref_feats_s4[:, 1]  # [B, 128, H/4, W/4]
+        # Step 5.2: Extract s1 features (no upsampling needed!)
+        feat_7_s1 = ref_feats_s1[:, 0]  # [B, 32, H, W]
+        feat_9_s1 = ref_feats_s1[:, 1]  # [B, 32, H, W]
 
-        # Apply channel reduction (128 -> 32)
-        feat_7_reduced = self.reduce_feat_7(feat_7_s4)  # [B, 32, H/4, W/4]
-        feat_9_reduced = self.reduce_feat_9(feat_9_s4)  # [B, 32, H/4, W/4]
-
-        # Step 5.3: Upsample reduced features to full resolution
-        feat_7_full = F.interpolate(
-            feat_7_reduced,
-            size=(H_full, W_full),
-            mode='bilinear',
-            align_corners=False
-        )
-        feat_9_full = F.interpolate(
-            feat_9_reduced,
-            size=(H_full, W_full),
-            mode='bilinear',
-            align_corners=False
-        )
-
-        # Step 5.4: Concatenate all inputs
-        refine_input = torch.cat([upsampled_coarse, feat_7_full, feat_9_full], dim=1)
+        # Step 5.3: Concatenate all inputs
+        refine_input = torch.cat([upsampled_coarse, feat_7_s1, feat_9_s1], dim=1)
         # [B, 67, H, W]
 
-        # Step 5.5: Process through refinement network
+        # Step 5.4: Process through refinement network
         x = self.conv_init(refine_input)
         x = self.res_blocks(x)
         x = self.conv_mid(x)
         residual = self.conv_out(x)
 
-        # Step 5.6: Add residual to upsampled coarse
+        # Step 5.5: Add residual
         final_frame = upsampled_coarse + residual
-
-        # Clamp to valid range [0, 1]
         final_frame = torch.clamp(final_frame, 0.0, 1.0)
 
         return {

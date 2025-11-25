@@ -65,40 +65,39 @@ class FeatureEncoder(nn.Module):
         super().__init__()
 
         # Channel dimensions for each scale
+        c_s1 = config.encoder_channels['s1']    # 32
         c_s4 = config.encoder_channels['s4']    # 128
         c_s8 = config.encoder_channels['s8']    # 192
         c_s16 = config.encoder_channels['s16']  # 256
 
-        # Initial convolution: 3 -> 32 -> 64
-        # CHANGED: Added stride=2 to first conv to start downsampling immediately
-        # Input: H, W -> Output: H/2, W/2
-        self.conv_init = nn.Sequential(
-            conv_block(3, 32, 3, 2, 1),  # Stride 2 here makes it 1/2 resolution
-            conv_block(32, 64, 3, 1, 1)
+        # --- SKALA S1 (Full Resolution) ---
+        # Input: H, W -> Output: H, W (Stride 1)
+        self.conv_s1 = nn.Sequential(
+            conv_block(3, 32, 3, 1, 1),
+            conv_block(32, c_s1, 3, 1, 1)
         )
 
-        # Scale s4 (1/4 resolution): stride 2 downsampling
-        # Input: H/2, W/2 -> Output: H/4, W/4
-        self.conv_s4 = nn.Sequential(
-            conv_block(64, 64, 3, 2, 1),  # Downsample
+        # Przejście s1 -> s2 -> s4
+        # Input: H, W -> Output: H/4, W/4
+        self.conv_s1_to_s4 = nn.Sequential(
+            conv_block(c_s1, 64, 3, 2, 1),      # Downsample to H/2
+            conv_block(64, 64, 3, 2, 1),        # Downsample to H/4
             ResidualBlock(64),
             ResidualBlock(64),
             conv_block(64, c_s4, 3, 1, 1)
         )
 
-        # Scale s8 (1/8 resolution): another stride 2
-        # Input: H/4, W/4 -> Output: H/8, W/8
+        # Scale s8 (1/8 resolution)
         self.conv_s8 = nn.Sequential(
-            conv_block(c_s4, c_s4, 3, 2, 1),  # Downsample
+            conv_block(c_s4, c_s4, 3, 2, 1),    # Downsample to H/8
             ResidualBlock(c_s4),
             ResidualBlock(c_s4),
             conv_block(c_s4, c_s8, 3, 1, 1)
         )
 
-        # Scale s16 (1/16 resolution): final stride 2
-        # Input: H/8, W/8 -> Output: H/16, W/16
+        # Scale s16 (1/16 resolution)
         self.conv_s16 = nn.Sequential(
-            conv_block(c_s8, c_s8, 3, 2, 1),  # Downsample
+            conv_block(c_s8, c_s8, 3, 2, 1),    # Downsample to H/16
             ResidualBlock(c_s8),
             ResidualBlock(c_s8),
             conv_block(c_s8, c_s16, 3, 1, 1)
@@ -115,14 +114,19 @@ class FeatureEncoder(nn.Module):
             Dictionary with keys 's4', 's8', 's16' containing features
         """
         # Initial features (now H/2, W/2)
-        x = self.conv_init(x)
+        feat_s1 = self.conv_s1(x)           # [B, 32, H, W]
 
-        # Extract at each scale
-        feat_s4 = self.conv_s4(x)     # [B, 128, H/4, W/4]
-        feat_s8 = self.conv_s8(feat_s4)  # [B, 192, H/8, W/8]
-        feat_s16 = self.conv_s16(feat_s8) # [B, 256, H/16, W/16]
+        # Downsample to s4
+        feat_s4 = self.conv_s1_to_s4(feat_s1) # [B, 128, H/4, W/4]
+
+        # Downsample to s8
+        feat_s8 = self.conv_s8(feat_s4)     # [B, 192, H/8, W/8]
+
+        # Downsample to s16
+        feat_s16 = self.conv_s16(feat_s8)   # [B, 256, H/16, W/16]
 
         return {
+            's1': feat_s1,
             's4': feat_s4,
             's8': feat_s8,
             's16': feat_s16
@@ -203,17 +207,17 @@ class FrameEncoder(nn.Module):
         self.encoder = FeatureEncoder(config)
 
         # Positional encodings for each scale
+        self.pos_enc_s1 = PositionalEncoding(
+            self.total_frames, config.encoder_channels['s1']
+        )
         self.pos_enc_s4 = PositionalEncoding(
-            self.total_frames,
-            config.encoder_channels['s4']
+            self.total_frames, config.encoder_channels['s4']
         )
         self.pos_enc_s8 = PositionalEncoding(
-            self.total_frames,
-            config.encoder_channels['s8']
+            self.total_frames, config.encoder_channels['s8']
         )
         self.pos_enc_s16 = PositionalEncoding(
-            self.total_frames,
-            config.encoder_channels['s16']
+            self.total_frames, config.encoder_channels['s16']
         )
 
         self.ref_indices = config.ref_indices
@@ -239,60 +243,54 @@ class FrameEncoder(nn.Module):
 
         # Storage for features
         feats_s16_list = []
+        ref_feats_s1 = []
         ref_feats_s4 = []
         ref_feats_s8 = []
 
-        # Logika wyznaczania "prawdziwego" indeksu czasowego
-        # Jeśli mamy 14 klatek (trening), zakładamy brak klatki środkowej.
-        # Jeśli mamy 15 klatek (test/inference z GT), indeksy są ciągłe.
-        is_training_mode = (T == self.num_frames - 1) # np. 14 klatek przy num_frames=15
-        mid_idx = self.num_frames // 2  # np. 7 dla 15 klatek
+        gap_idx = self.total_frames // 2  
+        has_gap = (T == self.num_frames) 
 
         for t in range(T):
-            # Extract single frame
             frame_t = frames[:, t]
-
-            # Extract features
             feats = self.encoder(frame_t)
 
-            # Obliczanie indeksu pozycyjnego (Positional Index)
-            if is_training_mode:
-                # Skip middle frame index (8th frame, index 7)
-                # Input t: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
-                # Real t:  0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14
-                real_t = t if t < mid_idx else t + 1
+            # Calculate REAL temporal index
+            if has_gap:
+                real_t = t if t < gap_idx else t + 1
             else:
                 real_t = t
 
-            # Add positional encoding using REAL time index
-            # Używamy real_t zamiast t
+            # s16 for Transformer (ALL frames)
             feat_s16 = self.pos_enc_s16(feats['s16'], real_t)
             feats_s16_list.append(feat_s16)
 
-            # Store s4 and s8 features only for reference frames
-            # Musimy sprawdzić, czy obecne t odpowiada indeksom referencyjnym
-            # self.ref_indices w configu odnosi się do indeksów w tensorze WEJŚCIOWYM
+            # s1, s4, s8 ONLY for Reference Frames (Memory Optimization)
             if t in self.ref_indices:
+                feat_s1 = self.pos_enc_s1(feats['s1'], real_t) # s1 + PE
                 feat_s4 = self.pos_enc_s4(feats['s4'], real_t)
                 feat_s8 = self.pos_enc_s8(feats['s8'], real_t)
+                
+                ref_feats_s1.append(feat_s1)
                 ref_feats_s4.append(feat_s4)
                 ref_feats_s8.append(feat_s8)
 
-        # Fallback (zachowanie z oryginału)
+        # Fallback
         if len(ref_feats_s4) == 0:
              for t in [0, 1]:
                  if t < T:
                     feats = self.encoder(frames[:, t])
+                    ref_feats_s1.append(feats['s1'])
                     ref_feats_s4.append(feats['s4'])
                     ref_feats_s8.append(feats['s8'])
 
-        # Stack features
         feats_s16 = torch.stack(feats_s16_list, dim=1)
+        ref_feats_s1 = torch.stack(ref_feats_s1, dim=1) # [B, 2, 32, H, W]
         ref_feats_s4 = torch.stack(ref_feats_s4, dim=1)
         ref_feats_s8 = torch.stack(ref_feats_s8, dim=1)
 
         return {
             'feats_s16': feats_s16,
+            'ref_feats_s1': ref_feats_s1, # Zwracamy s1
             'ref_feats_s4': ref_feats_s4,
             'ref_feats_s8': ref_feats_s8
         }

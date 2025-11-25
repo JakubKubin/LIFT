@@ -12,6 +12,9 @@ import argparse
 from tqdm import tqdm
 import numpy as np
 import time
+import matplotlib.pyplot as plt
+
+from utils.visualization import flow_to_color
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
@@ -31,6 +34,42 @@ from configs.default import Config
 # This allows CuDNN to benchmark convolution algorithms once and pick the fastest one for your 4070 Ti.
 torch.backends.cudnn.benchmark = True
 torch.autograd.set_detect_anomaly(True)
+
+def log_images_to_tensorboard(writer, outputs, gt, ref_frames, epoch, prefix='train'):
+    """Log images, flows, occlusions to TensorBoard."""
+    pred = outputs['prediction']
+
+    writer.add_images(f'{prefix}/prediction', pred[:4].clamp(0, 1), epoch)
+    writer.add_images(f'{prefix}/ground_truth', gt[:4].clamp(0, 1), epoch)
+    writer.add_images(f'{prefix}/ref_frame_7', ref_frames[:4, 0].clamp(0, 1), epoch)
+    writer.add_images(f'{prefix}/ref_frame_9', ref_frames[:4, 1].clamp(0, 1), epoch)
+
+    if 'flows' in outputs:
+        flow_31_vis = flow_to_color(outputs['flows']['flow_31'][:4])
+        flow_32_vis = flow_to_color(outputs['flows']['flow_32'][:4])
+        writer.add_images(f'{prefix}/flow_to_7', flow_31_vis, epoch)
+        writer.add_images(f'{prefix}/flow_to_9', flow_32_vis, epoch)
+
+    if 'occlusions' in outputs:
+        occ_31 = outputs['occlusions']['occ_31'][:4].expand(-1, 3, -1, -1)
+        occ_32 = outputs['occlusions']['occ_32'][:4].expand(-1, 3, -1, -1)
+        writer.add_images(f'{prefix}/occlusion_7', occ_31, epoch)
+        writer.add_images(f'{prefix}/occlusion_9', occ_32, epoch)
+
+    if 'warped' in outputs:
+        writer.add_images(f'{prefix}/warped_from_7', outputs['warped']['warped_31'][:4].clamp(0, 1), epoch)
+        writer.add_images(f'{prefix}/warped_from_9', outputs['warped']['warped_32'][:4].clamp(0, 1), epoch)
+
+    if 'attention_weights' in outputs:
+        alphas = outputs['attention_weights']
+        fig, ax = plt.subplots(figsize=(10, 3))
+        x = [i for i in range(15) if i != 8]
+        ax.bar(x, alphas[0].cpu().numpy())
+        ax.set_xlabel('Frame Index')
+        ax.set_ylabel('Attention Weight')
+        ax.set_title('Temporal Attention Weights (α)')
+        writer.add_figure(f'{prefix}/attention_weights', fig, epoch)
+        plt.close(fig)
 
 def get_optimizer(model, config):
     """Create AdamW optimizer."""

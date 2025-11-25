@@ -15,8 +15,9 @@ class Config:
 
     # Model architecture parameters
     # Stage 1: Encoder
-    encoder_scales = ['s4', 's8', 's16']  # Output scales
+    encoder_scales = ['s1', 's4', 's8', 's16']  # Output scales
     encoder_channels = {
+        's1': 32,
         's4': 128,
         's8': 192,
         's16': 256

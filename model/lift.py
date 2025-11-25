@@ -103,16 +103,16 @@ class LIFT(nn.Module):
 
         # Stage 1: Extract multi-scale features from all 15 frames
         encoder_output = self.encoder(frames)
-        feats_s16 = encoder_output['feats_s16']      # [B, 15, 256, H/16, W/16]
-        ref_feats_s4 = encoder_output['ref_feats_s4'] # [B, 2, 128, H/4, W/4]
-        ref_feats_s8 = encoder_output['ref_feats_s8'] # [B, 2, 192, H/8, W/8]
+        feats_s16 = encoder_output['feats_s16']
+        ref_feats_s4 = encoder_output['ref_feats_s4']
+        ref_feats_s8 = encoder_output['ref_feats_s8']
+        ref_feats_s1 = encoder_output['ref_feats_s1'] # Pobieramy s1
 
-        # Stage 2: Aggregate temporal context from 15 frames
+        # Stage 2 (Transformer) i Stage 3 (Flow) i Stage 4 (Synthesis) bez zmian...
         transformer_output = self.transformer(feats_s16)
-        context = transformer_output['context']              # [B, 256, H/16, W/16]
-        attention_weights = transformer_output['attention_weights']  # [B, 15]
+        context = transformer_output['context']
+        attention_weights = transformer_output['attention_weights']
 
-        # Stage 3: Estimate optical flows and occlusion maps
         flow_output = self.flow_estimator(
             ref_frames,
             ref_feats_s8,
@@ -121,15 +121,15 @@ class LIFT(nn.Module):
             timestep
         )
 
-        # Stage 4: Synthesize coarse frame at s4
         synthesis_output = self.synthesis(ref_frames, flow_output, context)
-        coarse_frame = synthesis_output['coarse_frame']  # [B, 3, H/4, W/4]
+        coarse_frame = synthesis_output['coarse_frame']
 
-        # Stage 5: Refine to full resolution
-        refinement_output = self.refinement(coarse_frame, ref_feats_s4)
-        final_frame = refinement_output['final_frame']  # [B, 3, H, W]
+        # Stage 5: Refine to full resolution using S1 features
+        # Zmieniono argument z ref_feats_s4 na ref_feats_s1
+        refinement_output = self.refinement(coarse_frame, ref_feats_s1)
+        final_frame = refinement_output['final_frame']
 
-        # Prepare output
+        # Prepare output (bez zmian)
         output = {
             'prediction': final_frame,
             'coarse': coarse_frame,
