@@ -106,9 +106,8 @@ class LIFT(nn.Module):
         feats_s16 = encoder_output['feats_s16']
         ref_feats_s4 = encoder_output['ref_feats_s4']
         ref_feats_s8 = encoder_output['ref_feats_s8']
-        ref_feats_s1 = encoder_output['ref_feats_s1'] # Pobieramy s1
+        ref_feats_s1 = encoder_output['ref_feats_s1']
 
-        # Stage 2 (Transformer) i Stage 3 (Flow) i Stage 4 (Synthesis) bez zmian...
         transformer_output = self.transformer(feats_s16)
         context = transformer_output['context']
         attention_weights = transformer_output['attention_weights']
@@ -117,7 +116,7 @@ class LIFT(nn.Module):
             ref_frames,
             ref_feats_s8,
             ref_feats_s4,
-            ref_feats_s1,
+            # ref_feats_s1,
             context,
             timestep
         )
@@ -126,7 +125,6 @@ class LIFT(nn.Module):
         coarse_frame = synthesis_output['coarse_frame']
 
         # Stage 5: Refine to full resolution using S1 features
-        # Zmieniono argument z ref_feats_s4 na ref_feats_s1
         refinement_output = self.refinement(coarse_frame, ref_feats_s1)
         final_frame = refinement_output['final_frame']
 

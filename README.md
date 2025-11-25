@@ -18,6 +18,7 @@ LIFT/
 │
 ├── dataset/           # Data pipeline
 │   ├── vimeo_15.py    # 15-frame sequence dataset
+|   |── ...
 │   └── __init__.py
 │
 ├── utils/             # Utilities
@@ -29,7 +30,7 @@ LIFT/
 │
 ├── train.py           # Training script
 ├── inference.py       # Inference script
-└── README.md          # This file
+└── README.md
 ```
 
 ## Data Pipeline Design
@@ -66,7 +67,7 @@ Each dataset item returns a dictionary:
     'frames': Tensor[15, 3, H, W],      # All 15 frames
     'ref_frames': Tensor[2, 3, H, W],   # Reference frames (7, 9)
     'gt': Tensor[3, H, W],              # Ground truth interpolation
-    'timestep': float                    # Interpolation time (0.5)
+    'timestep': float                   # Interpolation time (0.5)
 }
 ```
 
