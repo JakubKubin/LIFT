@@ -156,7 +156,7 @@ def run_image_mode(args, model, device, config):
 
     # Save output
     if os.path.isdir(args.output):
-        output_path = Path(args.output) / f'interpolated_t{args.timestep:.2f}.png'
+        output_path = Path(args.output) / f'interpolated_t{args.timestep:.2f}.{config.output_format}'
     else:
         output_path = Path(args.output)
 

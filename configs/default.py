@@ -6,12 +6,12 @@ class Config:
     """Configuration parameters for LIFT model."""
 
     # Data parameters
-    data_root = 'data/vimeo90k'
+    data_root = 'data/ucf101'
     num_frames = 15
     crop_size = (224, 224)
-    # crop_size = (224, 224)
     target_resolution = (256, 448)  # Target resolution for experiments
     input_scale = 1.0
+    max_sequences = 2000
 
     # Model architecture parameters
     # Encoder
@@ -22,7 +22,7 @@ class Config:
         's8': 192,
         's16': 256
     }
-    freeze_encoder_epochs = 2  # Freeze encoder for first N epochs was 10
+    freeze_encoder_epochs = 2  # Freeze encoder for first N epochs
 
     # Transformer
     transformer_layers = 3
@@ -48,6 +48,7 @@ class Config:
     # Training parameters
     batch_size = 10
     num_epochs = 50
+    val_interval = 5
     learning_rate = 3e-4
     weight_decay = 1e-3
     lr_warmup_steps = 2000
@@ -73,17 +74,13 @@ class Config:
     log_dir = 'logs'
     checkpoint_dir = 'checkpoints'
     log_interval = 100  # Log every N steps
-    val_interval = 1000  # Validate every N steps
-    save_interval = 5000  # Save checkpoint every N steps
+    image_log_interval = 100
+    save_interval = 100  # Save checkpoint every N steps
     num_val_samples = 100  # Number of samples for validation
-
-    # Distributed training
-    world_size = 1
-    local_rank = 0
-    distributed = False
+    histogram_log_interval = 100
+    gradient_log_interval = 100
 
     # Inference parameters
-    tta = False  # Test-time augmentation
     output_format = 'png'  # Output format for frames
 
     # Device
@@ -91,7 +88,7 @@ class Config:
 
     # Reproducibility
     seed = 42
-    deterministic = False  # Set to True for reproducible results (slower)
+    deterministic = False  # True for reproducible results (slower)
 
     @classmethod
     def from_dict(cls, config_dict):
