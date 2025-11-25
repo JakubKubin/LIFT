@@ -1,7 +1,5 @@
 """
 Example script demonstrating X4K1000FPS and UCF-101 dataset usage.
-
-Run this to test your dataset setup before training.
 """
 
 import torch
@@ -210,7 +208,7 @@ def main():
 
     all_passed = all(results.values())
     if all_passed:
-        print("\nAll tests passed! Your datasets are ready for training.")
+        print("\nAll tests passed! Datasets are ready for training.")
     else:
         print("\nSome tests failed. Please check the error messages above.")
 

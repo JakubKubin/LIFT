@@ -1,10 +1,7 @@
 # LIFT-15: Long-range Interpolation with Far Temporal context
 ## Specyfikacja Architektury (15 klatek)
 
-**Wersja:** 2.1
-**Data:** 2025-01
-**Autor:** [Twoje dane]
-**Cel:** Master Thesis - Video Frame Interpolation z rozszerzonym kontekstem czasowym
+**Cel:** - Video Frame Interpolation z rozszerzonym kontekstem czasowym
 
 ---
 
