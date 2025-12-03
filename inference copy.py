@@ -88,40 +88,154 @@ def pad_sequence(frames, target_length):
     return padded
 
 
+# def run_image_mode(args, model, device, config):
+#     """
+#     Run inference in Image Mode.
+#     If full sequence is provided, calculates metrics against Ground Truth.
+#     """
+#     print(f"\n--- Image Mode ---")
+#     print(f"Loading frames from {args.input}...")
+
+#     req_frames = args.num_frames if args.num_frames else config.num_frames
+#     frames = load_frames_from_directory(args.input, num_frames=req_frames)
+
+#     # Check if we have Ground Truth
+#     # LIFT expects 15 frames. The middle one (index 7) is the target.
+#     # If we loaded 15 frames, we have the real GT at index 7.
+#     has_gt = False
+#     gt_frame = None
+
+#     print(frames.shape[1], config.num_frames)
+
+#     if frames.shape[1] == config.num_frames:
+#         mid_idx = config.num_frames // 2
+#         gt_frame = frames[:, mid_idx].to(device)
+#         has_gt = True
+#         print(f"Ground Truth detected at frame index {mid_idx}.")
+
+#     # Padding if needed for model inference
+#     if frames.shape[1] < config.num_frames:
+#         input_frames = pad_sequence(frames, config.num_frames)
+#         print(f"Padded input tensor: {input_frames.shape}")
+#     else:
+#         input_frames = frames
+
+#     print(f"Interpolating at t={args.timestep}...")
+#     interpolated = interpolate_sequence(model, input_frames, timestep=args.timestep, device=device)
+
+#     # Calculate Metrics
+#     if has_gt and Evaluator is not None:
+#         print("\n--- Evaluation Metrics ---")
+#         evaluator = Evaluator(device)
+#         metrics = evaluator.compute_metrics(interpolated, gt_frame) # type: ignore
+
+#         print(f"PSNR:  {metrics['PSNR']:.4f} dB")
+#         print(f"SSIM:  {metrics['SSIM']:.4f}")
+#         print(f"LPIPS: {metrics['LPIPS']:.4f}")
+
+#         # Save metrics to file
+#         if os.path.isdir(args.output):
+#             metrics_path = Path(args.output) / "metrics.txt"
+#             with open(metrics_path, "w") as f:
+#                 f.write(f"Evaluation for: {args.input}\n")
+#                 for k, v in metrics.items():
+#                     f.write(f"{k}: {v:.6f}\n")
+#             print(f"Metrics saved to {metrics_path}")
+#     else:
+#         if not has_gt:
+#             print("No Ground Truth available for metrics calculation.")
+#         if Evaluator is None:
+#             print("Evaluator not available. Metrics calculation skipped.")
+
+#     # Save output image
+#     if os.path.isdir(args.output):
+#         output_path = Path(args.output) / f'interpolated_t{args.timestep:.2f}.png'
+#     else:
+#         output_path = Path(args.output)
+
+#     save_frame(interpolated[0], output_path)
+#     print(f"Saved interpolated frame to {output_path}")
+
 def run_image_mode(args, model, device, config):
     """
     Run inference in Image Mode.
-    If full sequence is provided, calculates metrics against Ground Truth.
+    Handles specific padding logic for 7 and 3 frame datasets to match 15-frame requirement.
     """
     print(f"\n--- Image Mode ---")
     print(f"Loading frames from {args.input}...")
 
-    req_frames = args.num_frames if args.num_frames else config.num_frames
-    frames = load_frames_from_directory(args.input, num_frames=req_frames)
+    # Load all available frames first to determine strategy
+    frames = load_frames_from_directory(args.input, num_frames=args.num_frames)
+    B, T, C, H, W = frames.shape
+    
+    print(f"Loaded {T} frames. Target input size is {config.num_frames} frames.")
 
-    # Check if we have Ground Truth
-    # LIFT expects 15 frames. The middle one (index 7) is the target.
-    # If we loaded 15 frames, we have the real GT at index 7.
     has_gt = False
     gt_frame = None
+    input_frames = None
 
-    if frames.shape[1] == config.num_frames:
+    # Logic for 7 Frames (GT is index 3)
+    if T == 7:
+        print("Detected 7-frame sequence. Applying 7x First / 7x Last padding strategy.")
+        
+        # Ground Truth is the middle frame of the original 7 (index 3)
+        gt_frame = frames[:, 3].to(device)
+        has_gt = True
+        
+        # Construct 15 frames: [First*7, GT, Last*7]
+        first_frame = frames[:, 0:1] # Shape: [B, 1, C, H, W]
+        last_frame = frames[:, 6:7]
+        middle_frame = frames[:, 3:4] # This is the GT, kept in tensor for shape
+        
+        # Repeat first and last frames 7 times
+        prefix = first_frame.repeat(1, 7, 1, 1, 1)
+        suffix = last_frame.repeat(1, 7, 1, 1, 1)
+        
+        # Concatenate: 7 + 1 + 7 = 15 frames
+        input_frames = torch.cat([prefix, middle_frame, suffix], dim=1)
+        print(f"Constructed input tensor: {input_frames.shape} (7x First, 1x GT, 7x Last)")
+
+    # Logic for 3 Frames (GT is index 1)
+    elif T == 3:
+        print("Detected 3-frame sequence. Applying 7x First / 7x Last padding strategy.")
+        
+        # Ground Truth is the middle frame (index 1)
+        gt_frame = frames[:, 1].to(device)
+        has_gt = True
+        
+        # Construct 15 frames: [First*7, GT, Last*7]
+        first_frame = frames[:, 0:1]
+        last_frame = frames[:, 2:3]
+        middle_frame = frames[:, 1:2]
+        
+        prefix = first_frame.repeat(1, 7, 1, 1, 1)
+        suffix = last_frame.repeat(1, 7, 1, 1, 1)
+        
+        input_frames = torch.cat([prefix, middle_frame, suffix], dim=1)
+        print(f"Constructed input tensor: {input_frames.shape} (7x First, 1x GT, 7x Last)")
+
+    # Logic for 15 Frames (Standard LIFT requirement)
+    elif T == config.num_frames:
+        print("Detected full 15-frame sequence.")
         mid_idx = config.num_frames // 2
-        mid_idx = 7
         gt_frame = frames[:, mid_idx].to(device)
         has_gt = True
-        print(f"Ground Truth detected at frame index {mid_idx}.")
-
-    gt_frame = frames[:, 7].to(device)
-    has_gt = True
-
-    # Padding if needed for model inference
-    if frames.shape[1] < config.num_frames:
-        input_frames = pad_sequence(frames, config.num_frames)
-        print(f"Padded input tensor: {input_frames.shape}")
-    else:
         input_frames = frames
 
+    # Fallback for other frame counts (Generic Padding)
+    else:
+        print(f"Frame count {T} does not match specific test cases (3, 7, or 15). using generic padding.")
+        if T < config.num_frames:
+            input_frames = pad_sequence(frames, config.num_frames)
+        else:
+            input_frames = frames[:, :config.num_frames]
+
+        # Try to define a GT if possible (simple middle), though accuracy is not guaranteed for metrics
+        if T % 2 == 1:
+            gt_frame = frames[:, T // 2].to(device)
+            has_gt = True
+
+    # Run Inference
     print(f"Interpolating at t={args.timestep}...")
     interpolated = interpolate_sequence(model, input_frames, timestep=args.timestep, device=device)
 
@@ -129,17 +243,17 @@ def run_image_mode(args, model, device, config):
     if has_gt and Evaluator is not None:
         print("\n--- Evaluation Metrics ---")
         evaluator = Evaluator(device)
-        metrics = evaluator.compute_metrics(interpolated, gt_frame) # type: ignore
+        metrics = evaluator.compute_metrics(interpolated, gt_frame)
 
         print(f"PSNR:  {metrics['PSNR']:.4f} dB")
         print(f"SSIM:  {metrics['SSIM']:.4f}")
         print(f"LPIPS: {metrics['LPIPS']:.4f}")
 
-        # Save metrics to file
         if os.path.isdir(args.output):
             metrics_path = Path(args.output) / "metrics.txt"
             with open(metrics_path, "w") as f:
                 f.write(f"Evaluation for: {args.input}\n")
+                f.write(f"Original Frames: {T}\n")
                 for k, v in metrics.items():
                     f.write(f"{k}: {v:.6f}\n")
             print(f"Metrics saved to {metrics_path}")
@@ -147,7 +261,7 @@ def run_image_mode(args, model, device, config):
         if not has_gt:
             print("No Ground Truth available for metrics calculation.")
         if Evaluator is None:
-            print("Evaluator class not available; skipping metrics calculation.")
+            print("Evaluator not available. Metrics calculation skipped.")
 
     # Save output image
     if os.path.isdir(args.output):
@@ -157,7 +271,6 @@ def run_image_mode(args, model, device, config):
 
     save_frame(interpolated[0], output_path)
     print(f"Saved interpolated frame to {output_path}")
-
 
 def run_video_mode(args, model, device, config):
     """Run inference to generate a video."""

@@ -6,8 +6,9 @@ from .visualization import (
     visualize_occlusion_maps,
     compute_gradient_stats,
     create_error_map,
-    create_comparison_grid
+    create_comparison_grid,
 )
+from .metrics import Evaluator
 
 __all__ = [
     'flow_to_color',
@@ -17,5 +18,6 @@ __all__ = [
     'visualize_occlusion_maps',
     'compute_gradient_stats',
     'create_error_map',
-    'create_comparison_grid'
+    'create_comparison_grid',
+    'Evaluator',
 ]
