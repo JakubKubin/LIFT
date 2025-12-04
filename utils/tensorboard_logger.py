@@ -3,14 +3,14 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
-# Import visualization utilities
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 from utils.visualization import flow_to_color, create_error_map
 
-# Import model for type hinting
-if TYPE_CHECKING:
-    from model import LIFT
+from model import LIFT
 
 class TensorBoardLogger:
     """
@@ -49,7 +49,7 @@ class TensorBoardLogger:
     def _log_model_architecture(self, model: 'LIFT'):
         """Log model architecture summary."""
         params = model.count_parameters()
-        self.writer.add_text('model/architecture', 
+        self.writer.add_text('model/architecture',
                              f"Total Params: {params['total']:,} | Trainable: {params['trainable']:,}", 0)
 
     def log_training_step(
@@ -69,14 +69,14 @@ class TensorBoardLogger:
                 if isinstance(value, torch.Tensor):
                     value = value.item()
                 self.writer.add_scalar(f'train/loss_{name}', value, step)
-            
+
             self.writer.add_scalar('train/lr', lr, step)
-            
+
             if batch_time:
                 self.writer.add_scalar('system/batch_time_ms', batch_time * 1000, step)
-            
+
             if torch.cuda.is_available():
-                self.writer.add_scalar('system/vram_gb', 
+                self.writer.add_scalar('system/vram_gb',
                                      torch.cuda.memory_allocated() / 1e9, step)
 
         # Images
@@ -95,16 +95,16 @@ class TensorBoardLogger:
         """Log validation metrics."""
         self.writer.add_scalar('val/loss_total', avg_losses['total'], epoch)
         self.writer.add_scalar('val/psnr', avg_psnr, epoch)
-        
+
         if outputs is not None and gt is not None:
             self._log_images('val', epoch, outputs, gt, ref_frames)
 
     def _log_images(
-        self, 
-        prefix: str, 
-        step: int, 
-        outputs: dict, 
-        gt: torch.Tensor, 
+        self,
+        prefix: str,
+        step: int,
+        outputs: dict,
+        gt: torch.Tensor,
         ref_frames: Optional[torch.Tensor] = None
     ):
         """Helper to log images."""

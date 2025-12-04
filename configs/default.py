@@ -8,8 +8,10 @@ class Config:
     # Data parameters
     data_root = 'data/ucf101'
     num_frames = 15
-    crop_size = (224, 224)
-    target_resolution = (256, 448)  # Target resolution for experiments
+    # crop_size = (224, 224)
+    # target_resolution = (256, 448)  # Target resolution for experiments
+    crop_size = (240, 320)
+    target_resolution = (240, 320)  # Target resolution for experiments
     input_scale = 1.0
     max_sequences = 2000
 

@@ -2,6 +2,17 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from math import exp
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="The parameter 'pretrained' is deprecated since 0.13",
+)
+warnings.filterwarnings(
+    "ignore",
+    message="Arguments other than a weight enum or `None` for 'weights'",
+)
+
 import lpips
 
 def gaussian(window_size, sigma):

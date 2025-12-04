@@ -1,0 +1,4 @@
+Evaluation for: C:\Users\Kubin\Desktop\LIFT\data\vimeo_test_clean\sequences\00002\0007
+PSNR: 28.208733
+SSIM: 0.911869
+LPIPS: 0.194779

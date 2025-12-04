@@ -56,6 +56,9 @@ class Vimeo15Dataset(Dataset):
 
         print(f"Loaded {len(self.sequences)} sequences for {mode}")
 
+    def visualize_samples(self, save_dir, num_samples=5):
+        pass  # Implementation of visualization method (omitted for brevity)
+
     def _load_sequences(self):
         """
         Load list of valid sequences that have at least num_frames frames.

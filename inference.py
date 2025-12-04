@@ -14,17 +14,12 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 from model import LIFT
 from configs.default import Config
 
-# Import Evaluator for metrics
-try:
-    from utils.metrics import Evaluator
-except ImportError:
-    print("Warning: utils.metrics not found. Metrics calculation disabled.")
-    Evaluator = None
-
+from utils.metrics import Evaluator
 
 def load_frames_from_directory(frame_dir, num_frames=None):
     """Load frames from directory [1, T, 3, H, W]."""
@@ -76,17 +71,66 @@ def interpolate_sequence(model, frames, timestep=0.5, device='cuda'):
 
 
 def pad_sequence(frames, target_length):
-    """Pad sequence by repeating last frame."""
+    """
+    Pad sequence symmetrically to preserve the center frame.
+    Repeats the first frame at the beginning and the last frame at the end.
+    """
     B, T, C, H, W = frames.shape
     if T >= target_length:
         return frames
 
     diff = target_length - T
-    print(f"Padding input sequence from {T} to {target_length} frames (repeating last frame)...")
-    last_frame = frames[:, -1:].repeat(1, diff, 1, 1, 1)
-    padded = torch.cat([frames, last_frame], dim=1)
+
+    # Dzielimy różnicę na pół: dla 7->15 diff=8, więc front=4, back=4
+    pad_front = diff // 2
+    pad_back = diff - pad_front
+
+    print(f"Padding sequence: {T} -> {target_length} (Front: {pad_front} frames, Back: {pad_back} frames)...")
+
+    # Kopiowanie pierwszej klatki na przód
+    front_frames = frames[:, :1].repeat(1, pad_front, 1, 1, 1)
+
+    # Kopiowanie ostatniej klatki na tył
+    back_frames = frames[:, -1:].repeat(1, pad_back, 1, 1, 1)
+
+    # Sklejanie: [Kopie_Początku, Oryginał, Kopie_Końca]
+    padded = torch.cat([front_frames, frames, back_frames], dim=1)
     return padded
 
+def visualize_results(pred_tensor, gt_tensor, metrics_dict, output_path):
+    """
+    Wyświetla porównanie wizualne i zapisuje je jako obrazek.
+    Przyjmuje tensory [1, 3, H, W]
+    """
+    # Konwersja do numpy dla matplotlib
+    def tensor_to_img(t):
+        img = t.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        return (img * 255).clip(0, 255).astype(np.uint8)
+
+    pred_img = tensor_to_img(pred_tensor)
+    gt_img = tensor_to_img(gt_tensor)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+
+    axes[0].imshow(gt_img)
+    axes[0].set_title('Ground Truth', fontsize=14, fontweight='bold')
+    axes[0].axis('off')
+
+    axes[1].imshow(pred_img)
+    axes[1].set_title('Interpolated', fontsize=14, fontweight='bold')
+    axes[1].axis('off')
+
+    metrics_text = f"PSNR: {metrics_dict['PSNR']:.2f} dB  |  SSIM: {metrics_dict['SSIM']:.4f}  |  LPIPS: {metrics_dict['LPIPS']:.4f}"
+
+    fig.text(0.5, 0.05, metrics_text, ha='center', fontsize=12,
+             fontweight='bold', bbox=dict(boxstyle='round', facecolor='#f0f0f0', alpha=0.9))
+
+    plt.tight_layout(rect=(0, 0.1, 1, 1))
+
+    viz_path = str(output_path).replace('.png', '_comparison.png')
+    plt.savefig(viz_path)
+    plt.close(fig)
+    print(f"Comparison saved to {viz_path}")
 
 def run_image_mode(args, model, device, config):
     """
@@ -94,28 +138,31 @@ def run_image_mode(args, model, device, config):
     If full sequence is provided, calculates metrics against Ground Truth.
     """
     print(f"\n--- Image Mode ---")
+
+    if os.path.isdir(args.output):
+        output_path = Path(args.output) / f'interpolated_t{args.timestep:.2f}.png'
+    else:
+        output_path = Path(args.output)
+
     print(f"Loading frames from {args.input}...")
 
     req_frames = args.num_frames if args.num_frames else config.num_frames
     frames = load_frames_from_directory(args.input, num_frames=req_frames)
 
-    # Check if we have Ground Truth
-    # LIFT expects 15 frames. The middle one (index 7) is the target.
-    # If we loaded 15 frames, we have the real GT at index 7.
-    has_gt = False
     gt_frame = None
 
-    if frames.shape[1] == config.num_frames:
-        mid_idx = config.num_frames // 2
-        mid_idx = 7
+    # Zakładamy, że GT to zawsze środkowa klatka wczytanej sekwencji
+    input_seq_len = frames.shape[1]
+
+    # Pobieramy GT z oryginału, jeśli mamy nieparzystą liczbę klatek
+    if input_seq_len % 2 == 1:
+        mid_idx = input_seq_len // 2
         gt_frame = frames[:, mid_idx].to(device)
-        has_gt = True
-        print(f"Ground Truth detected at frame index {mid_idx}.")
+        print(f"Ground Truth detected at original frame index {mid_idx} (Sequence length: {input_seq_len}).")
+    else:
+        print("Even number of frames provided. Cannot automatically determine center GT.")
 
-    gt_frame = frames[:, 7].to(device)
-    has_gt = True
-
-    # Padding if needed for model inference
+    # Padding (e.g., 7 -> 15)
     if frames.shape[1] < config.num_frames:
         input_frames = pad_sequence(frames, config.num_frames)
         print(f"Padded input tensor: {input_frames.shape}")
@@ -125,35 +172,19 @@ def run_image_mode(args, model, device, config):
     print(f"Interpolating at t={args.timestep}...")
     interpolated = interpolate_sequence(model, input_frames, timestep=args.timestep, device=device)
 
-    # Calculate Metrics
-    if has_gt and Evaluator is not None:
+    if gt_frame is not None:
         print("\n--- Evaluation Metrics ---")
         evaluator = Evaluator(device)
-        metrics = evaluator.compute_metrics(interpolated, gt_frame) # type: ignore
+        metrics = evaluator.compute_metrics(interpolated, gt_frame)
 
         print(f"PSNR:  {metrics['PSNR']:.4f} dB")
         print(f"SSIM:  {metrics['SSIM']:.4f}")
         print(f"LPIPS: {metrics['LPIPS']:.4f}")
 
-        # Save metrics to file
-        if os.path.isdir(args.output):
-            metrics_path = Path(args.output) / "metrics.txt"
-            with open(metrics_path, "w") as f:
-                f.write(f"Evaluation for: {args.input}\n")
-                for k, v in metrics.items():
-                    f.write(f"{k}: {v:.6f}\n")
-            print(f"Metrics saved to {metrics_path}")
+        visualize_results(interpolated, gt_frame, metrics, output_path)
     else:
-        if not has_gt:
+        if gt_frame is None:
             print("No Ground Truth available for metrics calculation.")
-        if Evaluator is None:
-            print("Evaluator class not available; skipping metrics calculation.")
-
-    # Save output image
-    if os.path.isdir(args.output):
-        output_path = Path(args.output) / f'interpolated_t{args.timestep:.2f}.png'
-    else:
-        output_path = Path(args.output)
 
     save_frame(interpolated[0], output_path)
     print(f"Saved interpolated frame to {output_path}")
@@ -250,6 +281,7 @@ def main():
                 setattr(config, key, value)
 
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
     model = LIFT(config).to(device)
 
     print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")

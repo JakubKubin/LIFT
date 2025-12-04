@@ -1,9 +1,10 @@
 """
 Training script for LIFT model.
-Optimized for Intel i7-14700K (20 Cores) + NVIDIA RTX 4070 Ti Super (16GB).
 """
 
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import torch
 import torch.nn as nn
 import argparse
@@ -32,7 +33,7 @@ from configs.default import Config
 from utils.tensorboard_logger import TensorBoardLogger
 
 torch.backends.cudnn.benchmark = True
-
+torch.backends.cudnn.deterministic = True
 
 def get_optimizer(model, config):
     return torch.optim.AdamW(
@@ -141,6 +142,7 @@ def train_epoch(
 
 
 def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, logger: TensorBoardLogger):
+    torch.cuda.empty_cache()
     model.eval()
 
     total_losses = {'total': 0.0, 'l1': 0.0}
@@ -245,6 +247,8 @@ def main():
             crop_size=config.crop_size, augment=False, input_scale=config.input_scale,
             max_sequences=args.max_sequences
         )
+
+        train_dataset.visualize_samples('vis_debug', num_samples=5)
     except ValueError as e:
         print(f"Error loading dataset: {e}")
         return

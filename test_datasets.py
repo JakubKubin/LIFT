@@ -9,7 +9,6 @@ import argparse
 from dataset import (
     X4K1000FPSDataset,
     UCF101Dataset,
-    create_ucf101_with_official_splits,
     collate_fn
 )
 
@@ -99,8 +98,7 @@ def test_ucf101(data_root='/data/UCF-101', batch_size=2, num_samples=5):
             num_frames=15,
             crop_size=(224, 224),
             augment=True,
-            cache_frames=False,
-            use_official_splits=False
+            cache_frames=False
         )
 
         print(f"\nDataset created successfully!")
