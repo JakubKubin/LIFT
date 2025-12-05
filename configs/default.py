@@ -1,19 +1,24 @@
 """
 Default configuration for LIFT model training and inference.
 """
+from pathlib import Path
 
 class Config:
     """Configuration parameters for LIFT model."""
 
     # Data parameters
-    data_root = 'data/ucf101'
+    data_root = None
     num_frames = 15
     # crop_size = (224, 224)
     # target_resolution = (256, 448)  # Target resolution for experiments
     crop_size = (240, 320)
     target_resolution = (240, 320)  # Target resolution for experiments
     input_scale = 1.0
-    max_sequences = 2000
+    max_sequences = 10000
+    max_val_sequences = 5000
+
+    train_stride = 5
+    val_stride = 15
 
     # Model architecture parameters
     # Encoder
@@ -52,9 +57,10 @@ class Config:
     num_epochs = 50
     val_interval = 5
     learning_rate = 3e-4
-    weight_decay = 1e-3
+    weight_decay = 1e-2
     lr_warmup_steps = 2000
-    lr_min = 3e-6
+    lr_warmup_epochs = 3
+    lr_min = 1e-6
 
     # Loss weights
     loss_l1_weight = 1.0

@@ -17,6 +17,7 @@ import random
 from pathlib import Path
 from typing import Tuple
 from .base_video import BaseVideoDataset
+from pathlib import Path
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
@@ -33,7 +34,7 @@ class X4K1000FPSDataset(BaseVideoDataset):
     """
 
     def __init__(self,
-                 data_root: str = '/data/X4K1000FPS',
+                 data_root: str | None = str(Path(__file__).parent.parent.resolve() / 'data' / 'X4K1000FPS'),
                  mode: str = 'train',
                  num_frames: int = 15,
                  crop_size: Tuple[int, int] = (224, 224),
@@ -43,7 +44,10 @@ class X4K1000FPSDataset(BaseVideoDataset):
                  val_split: float = 0.1,
                  input_scale: float = 1.0,
                  max_sequences: int | None = None,
-                 stride: int | None = 1):
+                 stride: int = 1):
+
+        if data_root is None:
+            data_root = str(Path(__file__).parent.parent.resolve() / 'data' / 'X4K1000FPS')
 
         super().__init__(data_root, mode, num_frames, crop_size, augment,
                                 cache_frames, input_scale, stride, max_sequences)

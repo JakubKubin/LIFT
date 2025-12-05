@@ -6,7 +6,6 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import torch
-import torch.nn as nn
 import argparse
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -17,7 +16,6 @@ import warnings
 # Suppress torchvision warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision.models._utils")
 
-# Import datasets
 from dataset import (
     Vimeo15Dataset,
     X4K1000FPSDataset,
@@ -25,31 +23,61 @@ from dataset import (
     collate_fn
 )
 
-# Import Model, Loss and Config
 from model import LIFT, LIFTLoss
 from configs.default import Config
 
-# Import Logger
 from utils.tensorboard_logger import TensorBoardLogger
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
 def get_optimizer(model, config):
-    return torch.optim.AdamW(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay
-    )
+    """
+    AdamW optimizer that correctly excludes biases and LayerNorms from weight decay.
+    This is standard practice for Transformers (ViT, Swin, BERT, GPT).
+    """
+    decay_params = []
+    no_decay_params = []
 
+    no_decay_names = ['bias', 'LayerNorm.weight', 'LayerNorm.bias', 'norm.weight', 'norm.bias', 'bn.weight', 'bn.bias']
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        # No decay for specific parameters
+        if any(nd in name for nd in no_decay_names):
+            no_decay_params.append(param)
+        else:
+            decay_params.append(param)
+
+    optim_groups = [
+        {'params': decay_params, 'weight_decay': config.weight_decay},
+        {'params': no_decay_params, 'weight_decay': 0.0}
+    ]
+
+    return torch.optim.AdamW(
+        optim_groups,
+        lr=config.learning_rate,
+        betas=(0.9, 0.99) # For flow/video often 0.99 is more stable than the default 0.999
+    )
 
 def get_lr_scheduler(optimizer, config, steps_per_epoch):
     def lr_lambda(step):
+        # Phase 1: Linear Warmup
         if step < config.lr_warmup_steps:
-            return step / config.lr_warmup_steps
+            # Avoid division by zero if warmup_steps is 0
+            if config.lr_warmup_steps == 0:
+                return 1.0
+            return float(step) / float(config.lr_warmup_steps)
+
+        # Phase 2: Cosine Decay
         else:
             total_steps = config.num_epochs * steps_per_epoch
-            progress = (step - config.lr_warmup_steps) / (total_steps - config.lr_warmup_steps)
+            # This prevents the LR from going back up if training runs long
+            current_step = min(step, total_steps)
+
+            progress = (current_step - config.lr_warmup_steps) / (total_steps - config.lr_warmup_steps)
             cosine_decay = 0.5 * (1.0 + np.cos(np.pi * progress))
             return cosine_decay * (1.0 - config.lr_min / config.learning_rate) + config.lr_min / config.learning_rate
 
@@ -196,20 +224,16 @@ def validate(model: LIFT, dataloader, loss_fn: LIFTLoss, device, epoch, config, 
 
 
 def get_dataset_class(dataset_name):
-    if dataset_name.lower() == 'vimeo':
-        return Vimeo15Dataset
-    elif dataset_name.lower() == 'x4k':
-        return X4K1000FPSDataset
-    elif dataset_name.lower() == 'ucf101':
-        return UCF101Dataset
-    else:
-        raise ValueError(f"Unknown dataset: {dataset_name}")
+    # if dataset_name.lower() == 'vimeo': return Vimeo15Dataset
+    if dataset_name.lower() == 'x4k': return X4K1000FPSDataset
+    elif dataset_name.lower() == 'ucf101': return UCF101Dataset
+    else: raise ValueError(f"Unknown dataset: {dataset_name}")
 
 
 def main():
     parser = argparse.ArgumentParser(description='Train LIFT model')
-    parser.add_argument('--data_root', type=str, required=True)
-    parser.add_argument('--dataset', type=str, default='vimeo', choices=['vimeo', 'x4k', 'ucf101'])
+    parser.add_argument('--data_root', type=str, default=None)
+    parser.add_argument('--dataset', type=str, default='ucf101', choices=['vimeo', 'x4k', 'ucf101'])
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--num_epochs', type=int, default=None)
     parser.add_argument('--checkpoint', type=str, default=None)
@@ -217,14 +241,17 @@ def main():
     parser.add_argument('--num_workers', type=int, default=None)
     parser.add_argument('--num_frames', type=int, default=None)
     parser.add_argument('--max_sequences', type=int, default=None)
+    parser.add_argument('--max_val_sequences', type=int, default=None)
     args = parser.parse_args()
 
     config = Config()
-    config.data_root = args.data_root
+    if args.data_root: config.data_root = args.data_root
     if args.batch_size: config.batch_size = args.batch_size
     if args.num_epochs: config.num_epochs = args.num_epochs
     if args.num_workers: config.num_workers = args.num_workers
     if args.num_frames: config.num_frames = args.num_frames
+    if args.max_sequences: config.max_sequences = args.max_sequences
+    if args.max_val_sequences: config.max_val_sequences = args.max_val_sequences
 
     os.makedirs(config.log_dir, exist_ok=True)
     os.makedirs(config.checkpoint_dir, exist_ok=True)
@@ -232,20 +259,18 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    print(f"\nLoading {args.dataset.upper()} datasets from {config.data_root}...")
     DatasetClass = get_dataset_class(args.dataset)
-
     try:
         train_dataset = DatasetClass(
             data_root=config.data_root, mode='train', num_frames=config.num_frames,
             crop_size=config.crop_size, augment=True, input_scale=config.input_scale,
-            max_sequences=args.max_sequences
+            max_sequences=config.max_sequences, stride=config.train_stride
         )
 
         val_dataset = DatasetClass(
             data_root=config.data_root, mode='val', num_frames=config.num_frames,
             crop_size=config.crop_size, augment=False, input_scale=config.input_scale,
-            max_sequences=args.max_sequences
+            max_sequences=config.max_val_sequences, stride=config.val_stride
         )
 
         train_dataset.visualize_samples('vis_debug', num_samples=5)
@@ -266,6 +291,8 @@ def main():
         num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn,
         persistent_workers=True, prefetch_factor=2
     )
+
+    config.lr_warmup_steps = config.lr_warmup_epochs * len(train_loader)
 
     print("\nCreating LIFT model...")
     model = LIFT(config).to(device)
