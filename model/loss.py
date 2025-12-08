@@ -160,23 +160,30 @@ class FlowSmoothnessLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, flow):
+    def forward(self, flow, img):
         """
-        Compute smoothness loss on flow field.
-
         Args:
             flow: Flow tensor [B, 2, H, W]
-
-        Returns:
-            Scalar smoothness loss
+            img: Image tensor [B, 3, H, W] (used for edge awareness)
         """
-        # Horizontal gradients
-        grad_x = torch.abs(flow[:, :, :, :-1] - flow[:, :, :, 1:])
+        # Oblicz gradienty obrazu (krawędzie)
+        img_grad_x = torch.abs(img[:, :, :, :-1] - img[:, :, :, 1:]).mean(dim=1, keepdim=True)
+        img_grad_y = torch.abs(img[:, :, :-1, :] - img[:, :, 1:, :]).mean(dim=1, keepdim=True)
 
-        # Vertical gradients
-        grad_y = torch.abs(flow[:, :, :-1, :] - flow[:, :, 1:, :])
+        # Wagi: im silniejsza krawędź na obrazie, tym mniejsza waga dla smoothness loss
+        # exp(-alpha * grad) -> typowo alpha=10 lub podobne
+        weights_x = torch.exp(-torch.mean(img_grad_x, 1, keepdim=True) * 10)
+        weights_y = torch.exp(-torch.mean(img_grad_y, 1, keepdim=True) * 10)
 
-        return grad_x.mean() + grad_y.mean()
+        # Gradienty przepływu
+        flow_grad_x = torch.abs(flow[:, :, :, :-1] - flow[:, :, :, 1:])
+        flow_grad_y = torch.abs(flow[:, :, :-1, :] - flow[:, :, 1:, :])
+
+        # Ważona strata
+        loss_x = (flow_grad_x * weights_x).mean()
+        loss_y = (flow_grad_y * weights_y).mean()
+
+        return loss_x + loss_y
 
 
 class OcclusionLoss(nn.Module):
@@ -208,14 +215,17 @@ class OcclusionLoss(nn.Module):
             gt = F.interpolate(gt, size=warped1.shape[-2:], mode='bilinear', align_corners=False)
 
         # Compute photometric errors
-        error1 = torch.abs(warped1 - gt).mean(dim=1, keepdim=True)  # [B, 1, H, W]
-        error2 = torch.abs(warped2 - gt).mean(dim=1, keepdim=True)  # [B, 1, H, W]
+        # Dodajemy epsilon dla stabilności
+        error1 = torch.abs(warped1 - gt).mean(dim=1, keepdim=True)
+        error2 = torch.abs(warped2 - gt).mean(dim=1, keepdim=True)
 
-        # Ideal occlusion maps (1 where error is low)
-        ideal_occ1 = (error1 < error2).float()
-        ideal_occ2 = (error2 < error1).float()
+        # Ideal occlusion maps
+        # .detach() zapobiega przepływowi gradientów do flow przez target okluzji
+        # To stabilizuje 'target' dla sieci przewidującej okluzję.
+        ideal_occ1 = (error1 < error2).float().detach()
+        ideal_occ2 = (error2 < error1).float().detach()
 
-        # BCE loss between predicted and ideal occlusion
+        # BCE loss
         loss = F.binary_cross_entropy_with_logits(occ1_logits, ideal_occ1) + \
                F.binary_cross_entropy_with_logits(occ2_logits, ideal_occ2)
 
@@ -316,7 +326,14 @@ class LIFTLoss(nn.Module):
 
         # Flow smoothness
         if flow1 is not None and flow2 is not None:
-            losses['flow_smooth'] = (self.flow_smooth_loss(flow1) + self.flow_smooth_loss(flow2)) / 2.0
+            # Skalujemy target do rozmiaru flow (s4), żeby pasował wymiarami
+            target_s4 = F.interpolate(target, size=flow1.shape[-2:], mode='bilinear', align_corners=False)
+
+            # Przekazujemy target_s4 do edge-aware loss
+            losses['flow_smooth'] = (
+                self.flow_smooth_loss(flow1, target_s4) +
+                self.flow_smooth_loss(flow2, target_s4)
+            ) / 2.0
         else:
             losses['flow_smooth'] = torch.tensor(0.0, device=pred.device)
 

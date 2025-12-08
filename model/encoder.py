@@ -12,19 +12,7 @@ import math
 
 
 def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
-    """
-    Basic convolutional block with PReLU activation.
-
-    Args:
-        in_channels: Number of input channels
-        out_channels: Number of output channels
-        kernel_size: Convolution kernel size
-        stride: Stride for convolution
-        padding: Padding for convolution
-
-    Returns:
-        Sequential module
-    """
+    """Basic convolutional block with PReLU activation."""
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=True),
         nn.PReLU(out_channels)
@@ -32,11 +20,7 @@ def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
 
 
 class ResidualBlock(nn.Module):
-    """
-    Residual block for feature extraction.
-
-    Memory efficient implementation with in-place operations where possible.
-    """
+    """Residual block for feature extraction."""
 
     def __init__(self, channels):
         super().__init__()
@@ -48,7 +32,7 @@ class ResidualBlock(nn.Module):
         residual = x
         out = self.conv1(x)
         out = self.conv2(out)
-        out = out + residual  # Residual connection
+        out = out + residual
         out = self.prelu(out)
         return out
 
@@ -73,18 +57,19 @@ class FeatureEncoder(nn.Module):
         # Full resolution input conv
         # Input: H, W -> Output: H, W (Stride 1)
         self.conv_s1 = nn.Sequential(
-            conv_block(3, 32, 3, 1, 1),
-            conv_block(32, c_s1, 3, 1, 1)
+            conv_block(3, c_s1, 3, 1, 1),
+            conv_block(c_s1, c_s1, 3, 1, 1)
         )
 
-        # s1 -> s2 -> s4
-        # Input: H, W -> Output: H/4, W/4
+        # --- S1 -> S4 ---
+        mid_s4 = c_s4 // 2 if c_s4 > 128 else 64
+
         self.conv_s1_to_s4 = nn.Sequential(
-            conv_block(c_s1, 64, 3, 2, 1),      # Downsample to H/2
-            conv_block(64, 64, 3, 2, 1),        # Downsample to H/4
-            ResidualBlock(64),
-            ResidualBlock(64),
-            conv_block(64, c_s4, 3, 1, 1)
+            conv_block(c_s1, mid_s4, 3, 2, 1),    # Downsample to H/2
+            conv_block(mid_s4, c_s4, 3, 2, 1),    # Downsample to H/4
+            ResidualBlock(c_s4),
+            ResidualBlock(c_s4),
+            conv_block(c_s4, c_s4, 3, 1, 1)
         )
 
         # Scale s8 (1/8 resolution)
@@ -104,26 +89,10 @@ class FeatureEncoder(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Extract multi-scale features.
-
-        Args:
-            x: Input image [B, 3, H, W]
-
-        Returns:
-            Dictionary with keys 's1', 's4', 's8', 's16' containing features
-        """
-        # Initial features (now H/2, W/2)
-        feat_s1 = self.conv_s1(x)           # [B, 32, H, W]
-
-        # Downsample to s4
-        feat_s4 = self.conv_s1_to_s4(feat_s1) # [B, 128, H/4, W/4]
-
-        # Downsample to s8
-        feat_s8 = self.conv_s8(feat_s4)     # [B, 192, H/8, W/8]
-
-        # Downsample to s16
-        feat_s16 = self.conv_s16(feat_s8)   # [B, 256, H/16, W/16]
+        feat_s1 = self.conv_s1(x)
+        feat_s4 = self.conv_s1_to_s4(feat_s1)
+        feat_s8 = self.conv_s8(feat_s4)
+        feat_s16 = self.conv_s16(feat_s8)
 
         return {
             's1': feat_s1,

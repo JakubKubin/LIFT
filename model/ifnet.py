@@ -12,8 +12,6 @@ Adapted from RIFE's IFNet with modifications for LIFT:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .warplayer import backward_warp
-
 
 def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
     """Basic convolutional block with PReLU activation."""
@@ -283,8 +281,10 @@ class FlowEstimator(nn.Module):
 
 
 if __name__ == '__main__':
-    # Test flow estimator
-    from ..configs.default import Config
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    from configs.default import Config
 
     config = Config()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

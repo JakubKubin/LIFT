@@ -30,12 +30,15 @@ class ResBlock(nn.Module):
     def __init__(self, channels, num_groups=8):
         super().__init__()
 
+        # Determine number of groups for GroupNorm
+        groups = min(num_groups, channels) if channels > 0 else 1
+
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
-        self.gn1 = nn.GroupNorm(num_groups, channels)
+        self.gn1 = nn.GroupNorm(groups, channels)
         self.relu = nn.ReLU(inplace=True)
 
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
-        self.gn2 = nn.GroupNorm(num_groups, channels)
+        self.gn2 = nn.GroupNorm(groups, channels)
 
     def forward(self, x):
         """Forward pass with residual connection."""
@@ -60,12 +63,10 @@ class FullResolutionRefinement(nn.Module):
 
     Pipeline:
     1. Upsample coarse frame to full resolution
-    2. Reduce channels of reference features (128 -> 32)
-    3. Upsample reduced features to full resolution
-    4. Concatenate all inputs (3 + 32 + 32 = 67 channels)
-    5. Process through lightweight refinement network
-    6. Output residual correction
-    7. Add to upsampled coarse for final output
+    2. Extract s1 features (already full resolution)
+    3. Concatenate all inputs
+    4. Process through lightweight refinement network
+    5. Add residual correction to upsampled coarse frame
     """
 
     def __init__(self, config):
@@ -74,15 +75,13 @@ class FullResolutionRefinement(nn.Module):
 
         # Input:
         # - Upsampled Coarse Frame (3 channels)
-        # - Feature Ref 1 (s1, 32 channels)
-        # - Feature Ref 2 (s1, 32 channels)
-        # Total = 3 + 32 + 32 = 67
+        # - Feature Ref 1 (s1, N channels)
+        # - Feature Ref 2 (s1, N channels)
 
-        # Usuwamy warstwy redukcji kanałów, bo s1 ma już 32 kanały
-        s1_channels = config.encoder_channels['s1'] # 32
+        s1_channels = config.encoder_channels['s1']
         input_channels = 3 + s1_channels * 2
 
-        hidden_channels = config.refine_channels[0]  # 64
+        hidden_channels = config.refine_channels[0]
 
         # Initial convolution
         self.conv_init = nn.Sequential(
@@ -113,13 +112,14 @@ class FullResolutionRefinement(nn.Module):
 
         Args:
             coarse_frame: [B, 3, H/4, W/4]
-            ref_feats_s1: [B, 2, 32, H, W] (Already Full Res)
+            ref_feats_s1: [B, 2, C_s1, H, W] (Already Full Res)
         """
         B, _, H_s4, W_s4 = coarse_frame.shape
 
         # Step 5.1: Upsample coarse frame to full resolution
         H_full = H_s4 * 4
         W_full = W_s4 * 4
+
         upsampled_coarse = F.interpolate(
             coarse_frame,
             size=(H_full, W_full),
@@ -127,13 +127,12 @@ class FullResolutionRefinement(nn.Module):
             align_corners=False
         )
 
-        # Step 5.2: Extract s1 features (no upsampling needed!)
-        feat_7_s1 = ref_feats_s1[:, 0]  # [B, 32, H, W]
-        feat_9_s1 = ref_feats_s1[:, 1]  # [B, 32, H, W]
+        # Step 5.2: Extract s1 features directly (no upsampling needed)
+        feat_7_s1 = ref_feats_s1[:, 0]  # [B, C_s1, H, W]
+        feat_9_s1 = ref_feats_s1[:, 1]  # [B, C_s1, H, W]
 
         # Step 5.3: Concatenate all inputs
         refine_input = torch.cat([upsampled_coarse, feat_7_s1, feat_9_s1], dim=1)
-        # [B, 67, H, W]
 
         # Step 5.4: Process through refinement network
         x = self.conv_init(refine_input)
@@ -153,6 +152,10 @@ class FullResolutionRefinement(nn.Module):
 
 
 if __name__ == '__main__':
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent))
+
     from configs.default import Config
 
     config = Config()

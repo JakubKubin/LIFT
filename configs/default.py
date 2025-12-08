@@ -24,12 +24,18 @@ class Config:
     # Encoder
     encoder_scales = ['s1', 's4', 's8', 's16']  # Output scales
     encoder_channels = {
-        's1': 32,
-        's4': 128,
-        's8': 192,
+        's1': 64,
+        's4': 64,
+        's8': 256,
         's16': 256
     }
-    freeze_encoder_epochs = 2  # Freeze encoder for first N epochs
+    # encoder_channels = {
+    #     's1': 32,
+    #     's4': 128,
+    #     's8': 192,
+    #     's16': 256
+    # }
+    freeze_encoder_epochs = 0  # Freeze encoder for first N epochs
 
     # Transformer
     transformer_layers = 3
