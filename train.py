@@ -287,8 +287,8 @@ def main():
     )
 
     val_loader = DataLoader(
-        val_dataset, batch_size=config.batch_size, shuffle=False,
-        num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn,
+        val_dataset, batch_size=config.batch_size // 2, shuffle=False,
+        num_workers=config.num_workers // 2, pin_memory=True, collate_fn=collate_fn,
         persistent_workers=True, prefetch_factor=2
     )
 

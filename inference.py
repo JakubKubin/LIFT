@@ -99,10 +99,10 @@ def pad_sequence(frames, target_length):
 
 def visualize_results(pred_tensor, gt_tensor, metrics_dict, output_path):
     """
-    Wyświetla porównanie wizualne i zapisuje je jako obrazek.
-    Przyjmuje tensory [1, 3, H, W]
+    Displays visual comparison and saves it as an image.
+    Accepts tensors [1, 3, H, W]
     """
-    # Konwersja do numpy dla matplotlib
+    # Convert to numpy for matplotlib
     def tensor_to_img(t):
         img = t.squeeze(0).permute(1, 2, 0).cpu().numpy()
         return (img * 255).clip(0, 255).astype(np.uint8)
@@ -127,7 +127,12 @@ def visualize_results(pred_tensor, gt_tensor, metrics_dict, output_path):
 
     plt.tight_layout(rect=(0, 0.1, 1, 1))
 
-    viz_path = str(output_path).replace('.png', '_comparison.png')
+    # Save visualization with _comparison suffix
+    # Handle png/mp4 suffix correctly if output_path is a full file path
+    if str(output_path).lower().endswith(('.png', '.jpg', '.jpeg')):
+        viz_path = str(output_path).rsplit('.', 1)[0] + '_comparison.png'
+    else:
+        viz_path = str(output_path) + '_comparison.png'
     plt.savefig(viz_path)
     plt.close(fig)
     print(f"Comparison saved to {viz_path}")
@@ -146,23 +151,28 @@ def run_image_mode(args, model, device, config):
 
     print(f"Loading frames from {args.input}...")
 
+    # If user specified num_frames, try to load that many.
+    # If directory has fewer, load_frames_from_directory will load what's available.
     req_frames = args.num_frames if args.num_frames else config.num_frames
     frames = load_frames_from_directory(args.input, num_frames=req_frames)
+    print(f"Loaded input tensor: {frames.shape}")
 
     gt_frame = None
 
-    # Zakładamy, że GT to zawsze środkowa klatka wczytanej sekwencji
-    input_seq_len = frames.shape[1]
-
-    # Pobieramy GT z oryginału, jeśli mamy nieparzystą liczbę klatek
-    if input_seq_len % 2 == 1:
-        mid_idx = input_seq_len // 2
+    if frames.shape[1] == config.num_frames:
+        mid_idx = config.num_frames // 2
         gt_frame = frames[:, mid_idx].to(device)
-        print(f"Ground Truth detected at original frame index {mid_idx} (Sequence length: {input_seq_len}).")
-    else:
-        print("Even number of frames provided. Cannot automatically determine center GT.")
+        print(f"Ground Truth detected at frame index {mid_idx}.")
 
-    # Padding (e.g., 7 -> 15)
+    # Check if we loaded exactly 3 frames (triplet), common for VFI testing
+    elif frames.shape[1] == 3 and config.num_frames > 3:
+        gt_frame = frames[:, 1].to(device) # Middle frame is GT
+        # For inference we need more context, so we might need padding or
+        # specifically crafting input if user provided only 3 frames but model needs 15.
+        # Here we assume user provides full sequence or we pad.
+        print("Loaded 3 frames, assuming middle is GT.")
+
+    # Ensure we meet the model's requirement (usually 15 frames)
     if frames.shape[1] < config.num_frames:
         input_frames = pad_sequence(frames, config.num_frames)
         print(f"Padded input tensor: {input_frames.shape}")
@@ -182,16 +192,25 @@ def run_image_mode(args, model, device, config):
         print(f"LPIPS: {metrics['LPIPS']:.4f}")
 
         visualize_results(interpolated, gt_frame, metrics, output_path)
-    else:
-        if gt_frame is None:
-            print("No Ground Truth available for metrics calculation.")
 
+        # Save metrics to text file
+        metrics_file = str(output_path).rsplit('.', 1)[0] + '_metrics.txt'
+        with open(metrics_file, "w") as f:
+            f.write(f"Source: {args.input}\n")
+            for k, v in metrics.items():
+                f.write(f"{k}: {v:.6f}\n")
+        print(f"Metrics saved to {metrics_file}")
+
+    else:
+        print("No Ground Truth available for metrics evaluation.")
+
+    # Save output image
     save_frame(interpolated[0], output_path)
     print(f"Saved interpolated frame to {output_path}")
 
 
 def run_video_mode(args, model, device, config):
-    """Run inference to generate a video."""
+    """Run inference to generate a video with interpolated frames."""
     print(f"\n--- Video Mode ---")
     print(f"Loading frames from {args.input}...")
 
@@ -271,7 +290,7 @@ def main():
     print("Loading model...")
     config = Config()
 
-    # Load Checkpoint with safety settings
+    # Load Checkpoint with safety settings (weights_only=False for scalar configs)
     checkpoint = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
 
     if 'config' in checkpoint:
@@ -294,6 +313,8 @@ def main():
         if k in model_state:
             if v.shape == model_state[k].shape:
                 new_state[k] = v
+            else:
+                print(f"Skipping {k} due to shape mismatch: checkpoint {v.shape} vs model {model_state[k].shape}")
 
     model.load_state_dict(new_state, strict=False)
 
@@ -301,6 +322,7 @@ def main():
         run_image_mode(args, model, device, config)
     elif args.mode == 'video':
         run_video_mode(args, model, device, config)
+
 
 if __name__ == '__main__':
     main()

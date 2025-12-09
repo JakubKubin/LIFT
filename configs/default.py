@@ -17,24 +17,18 @@ class Config:
     max_sequences = 10000
     max_val_sequences = 5000
 
-    train_stride = 5
+    train_stride = 15
     val_stride = 15
 
     # Model architecture parameters
     # Encoder
     encoder_scales = ['s1', 's4', 's8', 's16']  # Output scales
     encoder_channels = {
-        's1': 64,
-        's4': 64,
-        's8': 256,
+        's1': 32,
+        's4': 128,
+        's8': 192,
         's16': 256
     }
-    # encoder_channels = {
-    #     's1': 32,
-    #     's4': 128,
-    #     's8': 192,
-    #     's16': 256
-    # }
     freeze_encoder_epochs = 0  # Freeze encoder for first N epochs
 
     # Transformer
@@ -61,7 +55,7 @@ class Config:
     # Training parameters
     batch_size = 10
     num_epochs = 50
-    val_interval = 5
+    val_interval = 1
     learning_rate = 3e-4
     weight_decay = 1e-2
     lr_warmup_steps = 2000
@@ -77,10 +71,10 @@ class Config:
 
     # Optimization
     gradient_clip = 1.0
-    mixed_precision = False
+    mixed_precision = True
 
     # DataLoader parameters
-    num_workers = 12
+    num_workers = 6
     pin_memory = True
     prefetch_factor = 1
 
