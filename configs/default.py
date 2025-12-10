@@ -65,7 +65,7 @@ class Config:
     # Loss weights
     loss_l1_weight = 1.0
     loss_lap_weight = 1.0
-    loss_flow_weight = 0.01
+    loss_flow_weight = 0.1
     loss_occlusion_weight = 0.1
     loss_perceptual_weight = 0.1
 

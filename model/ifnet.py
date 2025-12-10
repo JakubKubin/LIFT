@@ -12,6 +12,7 @@ Adapted from RIFE's IFNet with modifications for LIFT:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .warplayer import backward_warp
 
 def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1):
     """Basic convolutional block with PReLU activation."""
@@ -146,24 +147,29 @@ class FlowEstimator(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-
         self.config = config
 
-        # Number of input channels for each scale
-        # At s8: ref_feats (192*2) + context (256) + timestep (1) = 641
+        # s8: Coarse input channels
         c_s8_input = config.encoder_channels['s8'] * 2 + config.transformer_dim + 1
 
-        # At s4 refinement: ref_feats (128*2) + context (256) + prev_flow (4) + prev_occ (2) + timestep (1) = 519
-        c_s4_input = config.encoder_channels['s4'] * 2 + config.transformer_dim + 4 + 2 + 1
-
-        # Coarse estimation at s8
         self.block_s8 = FlowEstimationBlock(
             in_channels=c_s8_input,
             hidden_channels=config.flow_channels[8],
             num_res_blocks=8
         )
 
-        # Refinement at s4
+        # s4: Refinement input channels (Zwiększone dla Warped Features)
+        c_s4_feats = config.encoder_channels['s4']
+
+        # Obliczamy kanały wejściowe:
+        # Oryginalne (2*C) + Warpowane (2*C) + Kontekst + Flow + Occ + Czas
+        c_s4_input = (
+            c_s4_feats * 2 +       # feat_7, feat_9
+            c_s4_feats * 2 +       # warped_feat_7, warped_feat_9 (DODANE)
+            config.transformer_dim +  # context
+            4 + 2 + 1              # prev_flow, prev_occ, timestep
+        )
+
         self.block_s4 = FlowEstimationBlock(
             in_channels=c_s4_input,
             hidden_channels=config.flow_channels[4],
@@ -193,90 +199,66 @@ class FlowEstimator(nn.Module):
         B = ref_frames.shape[0]
         device = ref_frames.device
 
-        # Extract individual reference frames
-        I_7 = ref_frames[:, 0]  # [B, 3, H, W]
-        I_9 = ref_frames[:, 1]  # [B, 3, H, W]
-
-        # Extract features for each reference frame
-        feat_7_s8 = ref_feats_s8[:, 0]  # [B, 192, H/8, W/8]
-        feat_9_s8 = ref_feats_s8[:, 1]  # [B, 192, H/8, W/8]
-        feat_7_s4 = ref_feats_s4[:, 0]  # [B, 128, H/4, W/4]
-        feat_9_s4 = ref_feats_s4[:, 1]  # [B, 128, H/4, W/4]
+        feat_7_s8, feat_9_s8 = ref_feats_s8[:, 0], ref_feats_s8[:, 1]
+        feat_7_s4, feat_9_s4 = ref_feats_s4[:, 0], ref_feats_s4[:, 1]
 
         # Prepare timestep as spatial tensor
-        if isinstance(timestep, torch.Tensor):
-            if timestep.dim() == 0:  # Scalar
-                timestep = timestep.unsqueeze(0).repeat(B)
-            timestep = timestep.view(B, 1, 1, 1)
-        else:  # Float
+        if isinstance(timestep, (float, int)):
             timestep = torch.full((B, 1, 1, 1), timestep, device=device)
+        elif timestep.dim() == 0:
+            timestep = timestep.view(1, 1, 1, 1).expand(B, 1, 1, 1)
+        elif timestep.dim() == 1:
+             timestep = timestep.view(B, 1, 1, 1)
 
         # Stage 3.1: Coarse estimation at s8
         # Downsample context to s8
-        H_s8, W_s8 = feat_7_s8.shape[2], feat_7_s8.shape[3]
+        H_s8, W_s8 = feat_7_s8.shape[2:]
         context_s8 = F.interpolate(context, size=(H_s8, W_s8), mode='bilinear', align_corners=False)
-
-        # Create timestep map at s8
         timestep_s8 = timestep.expand(-1, -1, H_s8, W_s8)
 
         # Concatenate all inputs for s8
         input_s8 = torch.cat([feat_7_s8, feat_9_s8, context_s8, timestep_s8], dim=1)
-
-        # Predict coarse flows and occlusion logits
-        flow_s8, occ_logits_s8 = self.block_s8(input_s8, prev_flow=None, prev_occ_logits=None, scale=1)
+        flow_s8, occ_logits_s8 = self.block_s8(input_s8, scale=1)
 
         # Stage 3.2: Refinement at s4
         # Upsample flows from s8 to s4
-        H_s4, W_s4 = feat_7_s4.shape[2], feat_7_s4.shape[3]
-        flow_s8_to_s4 = F.interpolate(flow_s8, size=(H_s4, W_s4), mode='bilinear', align_corners=False) * 2
-        occ_logits_s8_to_s4 = F.interpolate(occ_logits_s8, size=(H_s4, W_s4), mode='bilinear', align_corners=False)
+        H_s4, W_s4 = feat_7_s4.shape[2:]
 
-        # Upsample context to s4
+        # Upsample coarse flow
+        flow_up = F.interpolate(flow_s8, size=(H_s4, W_s4), mode='bilinear', align_corners=False) * 2.0
+        occ_up = F.interpolate(occ_logits_s8, size=(H_s4, W_s4), mode='bilinear', align_corners=False)
+
+        # flow_up[:, :2] to ruch w stronę klatki 7. Pobieramy cechy z 7 i przesuwamy je "do nas" (do czasu t)
+        warped_feat_7 = backward_warp(feat_7_s4, flow_up[:, :2])
+
+        # flow_up[:, 2:] to ruch w stronę klatki 9.
+        warped_feat_9 = backward_warp(feat_9_s4, flow_up[:, 2:])
+
+        # Reszta bez zmian...
         context_s4 = F.interpolate(context, size=(H_s4, W_s4), mode='bilinear', align_corners=False)
-
-        # Create timestep map at s4
         timestep_s4 = timestep.expand(-1, -1, H_s4, W_s4)
 
-        # Concatenate all inputs for s4 refinement
         input_s4 = torch.cat([
-            feat_7_s4,
-            feat_9_s4,
+            feat_7_s4, feat_9_s4,         # Oryginały
+            warped_feat_7, warped_feat_9, # Warpowane
             context_s4,
-            flow_s8_to_s4,
-            occ_logits_s8_to_s4,
+            flow_up, occ_up,
             timestep_s4
         ], dim=1)
 
-        # Predict flow and occlusion residuals
-        flow_residual_s4, occ_logits_residual_s4 = self.block_s4(
-            input_s4,
-            prev_flow=None,  # Already concatenated
-            prev_occ_logits=None,  # Already concatenated
-            scale=1
-        )
+        flow_res, occ_res = self.block_s4(input_s4, scale=1)
 
-        # Add residuals to coarse estimates
-        flow_s4 = flow_s8_to_s4 + flow_residual_s4
-        occ_logits_s4 = occ_logits_s8_to_s4 + occ_logits_residual_s4
-
-        # Split flows and occlusion logits
-        flow_7 = flow_s4[:, :2]   # [B, 2, H/4, W/4]
-        flow_9 = flow_s4[:, 2:4]  # [B, 2, H/4, W/4]
-        logit_occ_7 = occ_logits_s4[:, 0:1]  # [B, 1, H/4, W/4]
-        logit_occ_9 = occ_logits_s4[:, 1:2]  # [B, 1, H/4, W/4]
-
-        # Apply sigmoid to get final occlusion maps
-        occ_7 = torch.sigmoid(logit_occ_7)
-        occ_9 = torch.sigmoid(logit_occ_9)
+        # Sumujemy
+        flow_final = flow_up + flow_res
+        occ_logits_final = occ_up + occ_res
 
         return {
-            'flow_7': flow_7,
-            'flow_9': flow_9,
-            'occ_7': occ_7,
-            'occ_9': occ_9,
-            'logit_occ_7': logit_occ_7,
-            'logit_occ_9': logit_occ_9,
-            'flows_combined': flow_s4,  # For convenience [B, 4, H/4, W/4]
+            'flow_7': flow_final[:, :2],
+            'flow_9': flow_final[:, 2:],
+            'occ_7': torch.sigmoid(occ_logits_final[:, 0:1]),
+            'occ_9': torch.sigmoid(occ_logits_final[:, 1:2]),
+            'logit_occ_7': occ_logits_final[:, 0:1],
+            'logit_occ_9': occ_logits_final[:, 1:2]
         }
 
 
