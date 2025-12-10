@@ -5,9 +5,16 @@ Aggregates temporal information from 15 frames using windowed attention.
 Uses spatial patching and temporal windowing for memory efficiency.
 """
 
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent.parent))
+
+from configs.default import Config
 
 class DepthwiseSeparableConv(nn.Module):
     """
@@ -50,6 +57,8 @@ class FullTemporalAttention(nn.Module):
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
 
+        self.dropout_p = dropout
+
         self.qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
         self.dropout = nn.Dropout(dropout)
@@ -71,21 +80,16 @@ class FullTemporalAttention(nn.Module):
 
         # QKV projection
         qkv = self.qkv(x)  # [B*L, T, 3*D]
-        qkv = qkv.reshape(B * L, T, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B*L, heads, T, head_dim]
+        qkv = qkv.reshape(B * L, T, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)  # [3, B*L, heads, T, head_dim]
 
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         # Scaled dot-product attention: Attention(Q, K, V)
         # [B*L, heads, T, head_dim] @ [B*L, heads, head_dim, T] -> [B*L, heads, T, T]
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.float().softmax(dim=-1).type_as(q)
-
-        attn = self.dropout(attn)
-
-        # Apply attention to values
-        out = attn @ v  # [B*L, heads, T, head_dim]
-
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            dropout_p=self.dropout_p if self.training else 0.0
+        )
         # Reshape back
         out = out.transpose(1, 2).reshape(B * L, T, D) # [B*L, T, D]
 
@@ -110,7 +114,7 @@ class TransformerBlock(nn.Module):
     Uses pre-normalization (LayerNorm before attention/FFN) for stability.
     """
 
-    def __init__(self, dim, num_heads=8, window_size=8, dropout=0.1):
+    def __init__(self, dim, num_heads=8, dropout=0.1):
         super().__init__()
 
         self.dim = dim
@@ -196,8 +200,7 @@ class TemporalAggregator(nn.Module):
         c_in = config.encoder_channels['s16']
         patch_dim = c_in * self.patch_size * self.patch_size
 
-        # Debug print to confirm what is happening
-        print(f"TemporalAggregator: patch_dim={patch_dim}, dim={self.dim}")
+        print(f"TemporalAggregator Config: layers={self.num_layers}, dim={self.dim}, heads={self.num_heads}, dropout={config.transformer_dropout}")
 
         # Define projection layer in __init__ to ensure it's registered
         if patch_dim != self.dim:
@@ -338,12 +341,6 @@ class TemporalAggregator(nn.Module):
 
 
 if __name__ == '__main__':
-    from pathlib import Path
-    import sys
-
-    sys.path.append(str(Path(__file__).parent.parent))
-    from configs.default import Config
-
     config = Config()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

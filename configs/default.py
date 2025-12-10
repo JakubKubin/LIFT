@@ -17,8 +17,8 @@ class Config:
     max_sequences = 10000
     max_val_sequences = 5000
 
-    train_stride = 15
-    val_stride = 15
+    train_stride = 50
+    val_stride = 50
 
     # Model architecture parameters
     # Encoder
@@ -152,8 +152,7 @@ class Config:
            Calculation: 64//2 - 1 = 31.
         """
         mid = self.num_frames // 2
-        # The formula [mid-1, mid] works for both cases relative to the reduced input tensor
-        return [mid - 1, mid]
+        return [mid - 1, mid + 1]
 
 # Create default config instance
 default_config = Config()
