@@ -1,13 +1,3 @@
-"""
-Batch Inference Script for LIFT Model Evaluation.
-
-Features:
-- Optimized random sampling (robust to directory structures like UCF-101/Vimeo)
-- Batch metrics calculation (PSNR, SSIM, LPIPS)
-- Comprehensive visualizations for human evaluation
-- Summary statistics and detailed reports
-"""
-
 import os
 import cv2
 import torch
@@ -212,7 +202,7 @@ class BatchInference:
             if clean_key in model_state:
                 if v.shape == model_state[clean_key].shape:
                     new_state[clean_key] = v
-        
+
         model.load_state_dict(new_state, strict=False)
         model.eval()
 
@@ -222,7 +212,26 @@ class BatchInference:
 
         return model
 
-    def sample_sequences_lazy(self, data_dir: str, num_sequences: int, seed: int = 42) -> List[Tuple[Path, int]]:
+    def _create_error_map(self, pred: torch.Tensor, target: torch.Tensor, amplify: float = 5.0) -> np.ndarray:
+        """
+        Create amplified error visualization using Blue->Red gradient.
+        Returns: Numpy array [H, W, 3] uint8 ready for plotting.
+        """
+        # Obliczanie błędu na tensorach (według Twojego wzoru)
+        # [B, 3, H, W] -> średnia po kanałach -> [B, 1, H, W]
+        diff = torch.abs(pred - target).mean(dim=1, keepdim=True) * amplify
+        diff = diff.clamp(0, 1)
+
+        # Tworzenie mapy kolorów: R=błąd, G=0, B=1-błąd (Niebieski -> Czerwony)
+        # Wynik: [B, 3, H, W]
+        error_map_tensor = torch.cat([diff, torch.zeros_like(diff), 1 - diff], dim=1)
+
+        # Konwersja do numpy dla matplotlib: [H, W, 3]
+        error_map_np = (error_map_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+
+        return error_map_np
+
+    def sample_sequences_lazy(self, data_dir: str, num_sequences: int, seed: int = 44) -> List[Tuple[Path, int]]:
         """
         Robustly samples sequences by checking directory structure depth.
         Supports:
@@ -232,45 +241,45 @@ class BatchInference:
         """
         random.seed(seed)
         data_path = Path(data_dir)
-        
+
         if not data_path.exists():
             raise ValueError(f"Directory not found: {data_dir}")
 
         print(f"Sampling {num_sequences} sequences from {data_dir}...")
-        
+
         # 1. Collect potential containers (Files or Directories)
         # We look at depth 1 and 2 to find where the "items" are.
-        
+
         candidates = []
-        
+
         # Check depth 0 (files directly in root)
         direct_files = list(data_path.glob('*.avi')) + list(data_path.glob('*.mp4')) + list(data_path.glob('*.mkv'))
         if direct_files:
             candidates.extend(direct_files)
-            
+
         # Check depth 1 (folders in root)
         subdirs = [p for p in data_path.iterdir() if p.is_dir()]
-        
+
         # Shuffle subdirs to avoid scanning everything linearly
         random.shuffle(subdirs)
-        
+
         # Traverse subdirs to find videos or frame folders
         for sd in subdirs:
-            if len(candidates) > num_sequences * 5: # Optimization: Stop if we have enough candidates
+            if len(candidates) > num_sequences * 2:
                 break
-                
+
             # Check for videos inside subdir (UCF-101 style: Action/Video.avi)
             vids = list(sd.glob('*.avi')) + list(sd.glob('*.mp4'))
             if vids:
                 candidates.extend(vids)
                 continue
-            
+
             # Check for frames inside subdir (Vimeo simple style)
             frames = list(sd.glob('*.png')) + list(sd.glob('*.jpg'))
             if frames:
                 candidates.append(sd) # This dir is a sequence
                 continue
-                
+
             # Check depth 2 (Vimeo complex style: Seq/001/*.png)
             subsubdirs = [p for p in sd.iterdir() if p.is_dir()]
             if subsubdirs:
@@ -283,15 +292,15 @@ class BatchInference:
             raise ValueError(f"No video files or frame directories found in {data_dir}")
 
         random.shuffle(candidates)
-        
+
         # 2. Validate and Select
         valid_samples = []
-        
+
         print(f"Validating candidates...")
         for item in tqdm(candidates, desc="Checking"):
             if len(valid_samples) >= num_sequences:
                 break
-                
+
             try:
                 # Case A: Directory of frames
                 if item.is_dir():
@@ -299,20 +308,20 @@ class BatchInference:
                     if len(frames) >= self.num_frames:
                         start = random.randint(0, len(frames) - self.num_frames)
                         valid_samples.append((item, start))
-                
+
                 # Case B: Video file
                 elif item.is_file():
                     info = self.extractor.get_video_info(str(item))
                     if info['valid'] and info['total_frames'] >= self.num_frames:
                         start = random.randint(0, info['total_frames'] - self.num_frames)
                         valid_samples.append((item, start))
-                        
+
             except Exception:
                 continue
-                
+
         if len(valid_samples) < num_sequences:
             print(f"Warning: Only found {len(valid_samples)} valid sequences.")
-            
+
         return valid_samples
 
     def extract_and_prepare(self, video_path: Path, start_frame: int) -> Tuple[torch.Tensor, torch.Tensor, List[np.ndarray]]:
@@ -384,7 +393,7 @@ class BatchInference:
 
                 result = {
                     'idx': idx,
-                    'video': str(video_path.name),
+                    'video': str(video_path.relative_to(data_dir)),
                     'start_frame': start_frame,
                     'metrics': metrics
                 }
@@ -454,63 +463,61 @@ class BatchInference:
                             pred_tensor: torch.Tensor, gt_tensor: torch.Tensor,
                             metrics: Dict[str, float], save_path: Path,
                             video_name: str, start_frame: int):
-        """Create comprehensive visualization for human evaluation."""
+        """Create comprehensive visualization: Inputs -> Result -> Error."""
 
         pred_np = (pred_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-        gt_np = (gt_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        gt_np = (gt_tensor[0].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        error_map = self._create_error_map(pred_tensor, gt_tensor, amplify=5.0)
 
-        error_map = np.abs(pred_np.astype(float) - gt_np.astype(float))
-        error_map = (error_map / error_map.max() * 255).astype(np.uint8) if error_map.max() > 0 else error_map.astype(np.uint8)
+        fig = plt.figure(figsize=(16, 20))
+        gs = GridSpec(4, 2, figure=fig, height_ratios=[1, 1, 1.2, 0.2], wspace=0.05, hspace=0.15)
 
-        fig = plt.figure(figsize=(20, 12))
-        gs = GridSpec(3, 5, figure=fig, height_ratios=[1, 1, 0.8])
+        idx_prev = self.mid_idx - 1  # 6
+        idx_next = self.mid_idx + 1  # 8
 
-        context_indices = [0, 3, 6, 8, 11, 14]
-        context_indices = [i for i in context_indices if i < len(raw_frames)]
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.imshow(raw_frames[idx_prev])
+        ax1.set_title(f'Input Frame {idx_prev}', fontsize=16)
+        ax1.axis('off')
 
-        for i, frame_idx in enumerate(context_indices[:5]):
-            ax = fig.add_subplot(gs[0, i])
-            ax.imshow(raw_frames[frame_idx])
-            label = f"Frame {frame_idx}"
-            if frame_idx == self.mid_idx:
-                label += " (GT)"
-            ax.set_title(label, fontsize=10)
-            ax.axis('off')
+        ax2 = fig.add_subplot(gs[0, 1])
+        ax2.imshow(raw_frames[idx_next])
+        ax2.set_title(f'Input Frame {idx_next}', fontsize=16)
+        ax2.axis('off')
 
-        ax_gt = fig.add_subplot(gs[1, 0:2])
+        ax_gt = fig.add_subplot(gs[1, 0])
         ax_gt.imshow(gt_np)
-        ax_gt.set_title('Ground Truth (Frame 8)', fontsize=12, fontweight='bold')
+        ax_gt.set_title(f'Ground Truth (Frame {self.mid_idx})', fontsize=16, fontweight='bold')
         ax_gt.axis('off')
 
-        ax_pred = fig.add_subplot(gs[1, 2:4])
+        ax_pred = fig.add_subplot(gs[1, 1])
         ax_pred.imshow(pred_np)
-        ax_pred.set_title('LIFT Interpolated', fontsize=12, fontweight='bold')
+        ax_pred.set_title('LIFT Interpolated', fontsize=16, fontweight='bold')
         ax_pred.axis('off')
 
-        ax_err = fig.add_subplot(gs[1, 4])
+        ax_err = fig.add_subplot(gs[2, :])
         ax_err.imshow(error_map)
-        ax_err.set_title('Error Map (5x)', fontsize=12, fontweight='bold')
+        ax_err.set_title('Error Map (x5)', fontsize=16, fontweight='bold')
         ax_err.axis('off')
 
-        ax_metrics = fig.add_subplot(gs[2, :])
+        ax_metrics = fig.add_subplot(gs[3, :])
         ax_metrics.axis('off')
 
         metrics_text = (
-            f"Video: {video_name}  |  Start Frame: {start_frame}\n\n"
-            f"PSNR: {metrics['PSNR']:.2f} dB    |    "
-            f"SSIM: {metrics['SSIM']:.4f}    |    "
+            f"Video: {video_name}   |   Start Frame: {start_frame}\n"
+            f"PSNR: {metrics['PSNR']:.2f} dB   |   "
+            f"SSIM: {metrics['SSIM']:.4f}   |   "
             f"LPIPS: {metrics['LPIPS']:.4f}"
         )
 
         psnr_color = '#27ae60' if metrics['PSNR'] > 30 else '#f39c12' if metrics['PSNR'] > 25 else '#e74c3c'
 
         ax_metrics.text(0.5, 0.5, metrics_text, transform=ax_metrics.transAxes,
-                        fontsize=14, ha='center', va='center',
-                        bbox=dict(boxstyle='round,pad=1', facecolor='#f8f9fa',
-                                  edgecolor=psnr_color, linewidth=3))
+                        fontsize=16, ha='center', va='center',
+                        bbox=dict(boxstyle='round,pad=0.6', facecolor='#f8f9fa',
+                                  edgecolor=psnr_color, linewidth=2))
 
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
         plt.close()
 
     def _save_summary_visualization(self, all_metrics: Dict[str, List[float]],
@@ -574,8 +581,6 @@ class BatchInference:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
 
-        print(f"\nSummary visualization saved to {save_path}")
-
     def _print_summary(self, summary: Dict):
         """Print formatted summary to console."""
         print(f"\n{'='*60}")
@@ -602,7 +607,6 @@ def test_single_inference(pipeline: BatchInference, data_dir: str) -> bool:
     print(f"{'='*60}\n")
 
     try:
-        # Use lazy sampling for test too
         samples = pipeline.sample_sequences_lazy(data_dir, num_sequences=1)
         if not samples:
             print("ERROR: No videos found!")
@@ -689,7 +693,7 @@ Examples:
                         help='Number of frames per sequence (default: 15)')
     parser.add_argument('--crop_size', type=int, nargs=2, default=[256, 256],
                         help='Crop size [H, W] (default: 256 256)')
-    parser.add_argument('--seed', type=int, default=42,
+    parser.add_argument('--seed', type=int, default=44,
                         help='Random seed for reproducibility')
     parser.add_argument('--test', action='store_true',
                         help='Run quick test with single sample before full evaluation')
