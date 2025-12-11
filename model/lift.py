@@ -110,13 +110,11 @@ class LIFT(nn.Module):
 
         transformer_output = self.transformer(feats_s16)
         context = transformer_output['context']
-        attention_weights = transformer_output['attention_weights']
 
         flow_output = self.flow_estimator(
             ref_frames,
             ref_feats_s8,
             ref_feats_s4,
-            # ref_feats_s1,
             context,
             timestep
         )
@@ -126,12 +124,12 @@ class LIFT(nn.Module):
 
         # Stage 5: Refine to full resolution using S1 features
         refinement_output = self.refinement(coarse_frame, ref_feats_s1)
-        final_frame = refinement_output['final_frame']
 
-        # Prepare output (bez zmian)
+        # Prepare output dictionary
         output = {
-            'prediction': final_frame,
+            'prediction': refinement_output['final_frame'],
             'coarse': coarse_frame,
+            'blended_frame': synthesis_output['blended_frame'],
             'flows': {
                 'flow_7': flow_output['flow_7'],
                 'flow_9': flow_output['flow_9'],
@@ -146,7 +144,7 @@ class LIFT(nn.Module):
                 'warped_7': synthesis_output['warped_7'],
                 'warped_9': synthesis_output['warped_9'],
             },
-            'attention_weights': attention_weights,
+            'attention_weights': transformer_output['attention_weights'],
         }
 
         # Add intermediate outputs if requested

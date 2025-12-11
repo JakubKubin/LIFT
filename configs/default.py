@@ -152,7 +152,7 @@ class Config:
            Calculation: 64//2 - 1 = 31.
         """
         mid = self.num_frames // 2
-        return [mid - 1, mid + 1]
+        return [mid - 1, mid]
 
 # Create default config instance
 default_config = Config()

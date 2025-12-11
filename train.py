@@ -27,6 +27,7 @@ from model import LIFT, LIFTLoss
 from configs.default import Config
 
 from utils.tensorboard_logger import TensorBoardLogger
+from utils.debugger import inspect_input_batch, check_warping_sanity
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
@@ -155,6 +156,19 @@ def train_epoch(
             ref_frames=ref_frames,
             batch_time=batch_time
         )
+        
+        if global_step % 200 == 0:
+            # Sprawdzamy Flow_7 (powinien przesuwać Ref_7 -> GT)
+            logger.log_warping_sanity_check(
+                global_step, 
+                ref_frame=ref_frames[:, 0], # Klatka 7
+                flow=outputs['flows']['flow_7'], 
+                target=gt,
+                tag="flow_7_sanity"
+            )
+            
+        if global_step % 100 == 0:
+            logger.log_attention_weights(global_step, outputs['attention_weights'])
 
         for key in total_losses.keys():
             if key in losses:
@@ -293,6 +307,14 @@ def main():
     )
 
     config.lr_warmup_steps = config.lr_warmup_epochs * len(train_loader)
+    
+    print("Diagnosing data loading and integrity...")
+    debug_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
+    for i, batch in enumerate(debug_loader):
+        if i >= 3: break
+        inspect_input_batch(batch, config, output_dir='debug_check', batch_idx=i)
+    
+    print("Diagnostic finished. Check the 'debug_check' folder.\n")
 
     print("\nCreating LIFT model...")
     model = LIFT(config).to(device)
