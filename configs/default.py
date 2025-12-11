@@ -74,7 +74,7 @@ class Config:
     mixed_precision = True
 
     # DataLoader parameters
-    num_workers = 6
+    num_workers = 16
     pin_memory = True
     prefetch_factor = 1
 

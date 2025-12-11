@@ -85,7 +85,8 @@ class BaseVideoDataset(Dataset):
                  cache_frames: bool = False,
                  input_scale: float = 1.0,
                  stride: int | None = 1,
-                 max_sequences: int | None = None):
+                 max_sequences: int | None = None,
+                 min_motion_threshold: float = 0.005):
 
         self.data_root = Path(data_root)
         self.mode = mode
@@ -96,6 +97,7 @@ class BaseVideoDataset(Dataset):
         self.cache_frames = cache_frames
         self.input_scale = input_scale
         self.max_sequences = max_sequences
+        self.min_motion_threshold = min_motion_threshold
 
         if stride is None:
             self.stride = 1 if mode == 'train' else num_frames
@@ -146,26 +148,102 @@ class BaseVideoDataset(Dataset):
         else: # test
             return all_videos[val_end:]
 
+    # def _index_sequences(self, video_paths: List[Path]):
+    #     """
+    #     Iterates over provided videos and generates valid (path, start_frame) tuples.
+    #     """
+    #     self.video_list = []
+
+    #     for video_path in video_paths:
+    #         if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
+    #             break
+
+    #         try:
+    #             valid_starts = self.extractor.get_valid_start_frames(str(video_path), self.num_frames)
+    #             valid_starts = valid_starts[::self.stride]
+
+    #             for start in valid_starts:
+    #                 self.video_list.append((str(video_path), start))
+    #                 if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
+    #                     break
+    #         except Exception as e:
+    #             continue
     def _index_sequences(self, video_paths: List[Path]):
         """
         Iterates over provided videos and generates valid (path, start_frame) tuples.
+        Includes motion filtering during initialization to prune static scenes upfront.
         """
         self.video_list = []
+        skipped_static = 0
+        
+        # Jeśli threshold jest > 0, to włączamy filtrowanie
+        # Ale tylko dla treningu, w walidacji chcemy stały zestaw (nawet łatwy) do porównań
+        do_motion_filtering = (self.mode == 'train' and self.min_motion_threshold > 0)
+
+        print(f"Indexing sequences (Motion filtering: {do_motion_filtering})...")
 
         for video_path in video_paths:
             if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
                 break
 
             try:
+                # 1. Znajdź wszystkie potencjalne starty
                 valid_starts = self.extractor.get_valid_start_frames(str(video_path), self.num_frames)
                 valid_starts = valid_starts[::self.stride]
-
+                
                 for start in valid_starts:
+                    # 2. Jeśli włączone filtrowanie, sprawdź ruch TERAZ
+                    if do_motion_filtering:
+                        if not self._check_motion_validity(str(video_path), start):
+                            skipped_static += 1
+                            continue
+                            
+                    # Jeśli przeszło test (lub wyłączone), dodaj do listy
                     self.video_list.append((str(video_path), start))
+                    
                     if self.max_sequences is not None and len(self.video_list) >= self.max_sequences:
                         break
             except Exception as e:
+                # print(f"Error processing {video_path}: {e}")
                 continue
+
+        if do_motion_filtering:
+            print(f"Skipped {skipped_static} static sequences during indexing.")
+
+    def _check_motion_validity(self, video_path: str, start_frame: int) -> bool:
+        """
+        Checks if the sequence has enough motion around the GT frame.
+        Optimized to read only 2 specific frames.
+        """
+        mid_idx = self.num_frames // 2
+        
+        # Chcemy sprawdzić klatkę przed i po GT (np. 6 i 8 dla 15 klatek)
+        idx_left = start_frame + self.ref_source_idx[0]
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened(): return False
+        
+        try:
+            # Czytaj lewego sąsiada
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx_left)
+            ret1, frame_left = cap.read()
+            
+            cap.read() # Skip GT (środek)
+            ret2, frame_right = cap.read() # Read right neighbor
+            
+            if not (ret1 and ret2): return False
+            
+            # Quick conversion to grayscale for speed (optional but faster)
+            gray_left = cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY)
+            gray_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY)
+            
+            # Oblicz różnicę (L1 mean)
+            diff = np.mean(np.abs(gray_left.astype(float) - gray_right.astype(float))) / 255.0
+            
+            return float(diff) >= self.min_motion_threshold
+            
+        finally:
+            cap.release()
 
     def _auto_build_dataset(self, extensions: List[str], train_split: float = 0.8, val_split: float = 0.1):
         """Helper to run the full Scan -> Split -> Index pipeline."""
@@ -203,7 +281,7 @@ class BaseVideoDataset(Dataset):
                 attempts += 1
 
         raise RuntimeError(f"Failed to load data after {max_attempts} attempts.")
-
+    
     def _get_frames_from_video(self, video_path: str, start_frame: int) -> List[np.ndarray]:
         cache_key = f"{video_path}_{start_frame}_{self.input_scale}"
         if self._frame_cache is not None and cache_key in self._frame_cache:
